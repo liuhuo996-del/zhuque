@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---- P1.0 设计 token（CSS 变量） ----
+   论点：界面上出现颜色 = 系统做出了一个判断。其余全部灰阶。 */
+:root {
+  --canvas: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e3e6eb;
+  --ink: #12151a;
+  --ink-muted: #5b6472;
+  --ink-faint: #8b94a3;
+
+  /* 语义色：只用于判定结果，不得他用 */
+  --pass: #1f7a4d;
+  --block: #c0342b;
+  --warn: #b26a00;
+  --effect-read: #2c5fa8;
+  --effect-write: #b26a00; /* 与 warn 同色，语义一致，刻意为之 */
+  --effect-delete: #c0342b;
+
+  /* 语义色的浅底（列背景 / 行背景用） */
+  --pass-tint: rgba(31, 122, 77, 0.07);
+  --block-tint: rgba(192, 52, 43, 0.06);
+  --warn-tint: rgba(178, 106, 0, 0.07);
+}
+
+html {
+  font-family: Inter, 'Noto Sans SC', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+}
+
+code,
+pre,
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid var(--canvas);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 表单控件的统一样式 */
+.input {
+  @apply h-8 rounded border border-line bg-surface px-2.5 text-sm text-ink placeholder:text-ink-faint;
+}
+textarea.input {
+  @apply h-auto py-2;
+}
+
+/* 骨架屏：保持行高，避免跳动 */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.skeleton {
+  background: var(--border);
+  border-radius: 4px;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+/* 矩阵定位闪烁（风险摘要点击定位到列） */
+@keyframes col-flash {
+  0%, 100% { box-shadow: none; }
+  40% { box-shadow: 0 0 0 2px var(--ink); }
+}
+.col-flash {
+  animation: col-flash 0.9s ease-in-out 2;
+}
+
+/* 动效纪律：仅骨架屏 / StepBar 推进 / 矩阵格 hover 三处。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

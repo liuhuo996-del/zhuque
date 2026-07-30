@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: zhuque
+  datasource:
+    url: jdbc:postgresql://localhost:5432/zhuque
+    username: zhuque
+    password: zhuque
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+zhuque:
+  # M9 漂移检测的默认扫描间隔（可配）
+  drift:
+    spec-scan-interval: 6h
+    config-scan-interval: 6h
+  # M10 Key 轮换后旧 key 的保留重叠窗口
+  key:
+    rotation-overlap: 24h
+  # M3 匹配：池子超过该阈值才需要检索预筛（v1 不实现，只留扩展点）
+  matching:
+    prefilter-threshold: 2000
