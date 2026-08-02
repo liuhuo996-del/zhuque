@@ -1,9 +1,17 @@
 package com.zhuque.m6_testing;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import com.zhuque.persistence.ControlPlaneRepository;
 
 /**
  * M6-L0 · 静态检查。零外部依赖、秒级、确定性 100%——企业没有 staging 时，
@@ -23,6 +31,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class L0StaticChecker {
 
+    private final ControlPlaneRepository repository;
+
+    @Value("${zhuque.testing.similarity-threshold:0.78}")
+    private double similarityThreshold;
+    @Value("${zhuque.testing.max-token-budget:20000}")
+    private int maxTokenBudget;
+
+    public L0StaticChecker(ControlPlaneRepository repository) {
+        this.repository = repository;
+    }
+
     public record L0Case(String caseId, String result, String detail) {} // result: pass|warn|fail
 
     /**
@@ -31,7 +50,49 @@ public class L0StaticChecker {
      * caseId 命名规范：L0-{检查项}-{tool名}，前端按此分组展示。
      */
     public List<L0Case> run(UUID releaseId) {
-        throw new UnsupportedOperationException("TODO");
+        var release = repository.requireRelease(releaseId);
+        List<Map<String, Object>> tools = tools(release.manifest());
+        List<L0Case> result = new ArrayList<>();
+        int totalTokens = 0;
+        for (Map<String, Object> tool : tools) {
+            String name = String.valueOf(tool.get("name"));
+            Map<String, Object> schema = map(tool.get("inputSchema"));
+            Map<String, Object> properties = map(schema.get("properties"));
+            List<String> badParams = properties.entrySet().stream().filter(entry -> {
+            Map<String, Object> definition = map(entry.getValue());
+            boolean missingDescription = String.valueOf(definition.getOrDefault("description", "")).isBlank();
+            boolean emptyEnum = definition.containsKey("enum") && list(definition.get("enum")).isEmpty();
+            return missingDescription || emptyEnum;
+            }).map(Map.Entry::getKey).toList();
+            result.add(caseOf("L0-schema-" + name, badParams.isEmpty() ? "pass" : "fail",
+                badParams.isEmpty() ? "参数描述与值域完整" : "缺少参数描述或 enum 值域：" + badParams));
+            boolean blackHole = Boolean.TRUE.equals(schema.get("additionalProperties"));
+            result.add(caseOf("L0-additional-properties-" + name, blackHole ? "fail" : "pass",
+                blackHole ? "inputSchema 允许任意字段；请声明明确参数" : "未发现 additionalProperties:true"));
+            List<?> outputs = list(tool.get("outputFields"));
+            result.add(caseOf("L0-response-" + name, outputs.isEmpty() ? "warn" : "pass",
+                outputs.isEmpty() ? "缺少 response schema/output_fields" : "已提取 " + outputs.size() + " 个输出字段"));
+            List<?> sensitive = list(tool.get("sensitivityFlags"));
+            result.add(caseOf("L0-sensitive-" + name, sensitive.isEmpty() ? "pass" : "warn",
+                sensitive.isEmpty() ? "未命中敏感字段" : "命中敏感字段：" + sensitive));
+            String effect = String.valueOf(tool.get("effect"));
+            Map<String, Object> template = map(tool.get("requestTemplate"));
+            boolean idempotent = !"write".equals(effect) || template.toString().toLowerCase(Locale.ROOT)
+                .contains("idempotency");
+            result.add(caseOf("L0-idempotency-" + name, idempotent ? "pass" : "warn",
+                idempotent ? "读操作或已声明幂等信号" : "写工具未声明 Idempotency-Key，须由 L1 实测"));
+            totalTokens += number(tool.get("tokenCost"));
+        }
+        result.add(caseOf("L0-budget-release", totalTokens <= maxTokenBudget ? "pass" : "warn",
+            "工具 token_cost 合计 " + totalTokens + "，预算 " + maxTokenBudget));
+        for (String pair : similarToolPairs(releaseId)) {
+            result.add(caseOf("L0-similarity-" + pair.replace(" ↔ ", "-"), "warn",
+                "工具过于相似，Agent 可能误选：" + pair));
+        }
+        repository.deleteTestReports(releaseId, "L0");
+        result.forEach(item -> repository.insertTestReport(releaseId, "L0", item.caseId(), item.result(),
+            Map.of("message", item.detail()), Map.of()));
+        return List.copyOf(result);
     }
 
     /**
@@ -39,6 +100,64 @@ public class L0StaticChecker {
      * 返回超过阈值的 tool 对。阈值可配。
      */
     public List<String> similarToolPairs(UUID releaseId) {
-        throw new UnsupportedOperationException("TODO");
+        List<Map<String, Object>> tools = tools(repository.requireRelease(releaseId).manifest());
+        List<String> result = new ArrayList<>();
+        for (int left = 0; left < tools.size(); left++) {
+            for (int right = left + 1; right < tools.size(); right++) {
+                Map<String, Object> a = tools.get(left);
+                Map<String, Object> b = tools.get(right);
+                double score = similarity(a.get("name") + " " + a.get("description"),
+                        b.get("name") + " " + b.get("description"));
+                if (score >= similarityThreshold) {
+                    result.add(a.get("name") + " ↔ " + b.get("name") + " (" + String.format(Locale.ROOT, "%.2f", score) + ")");
+                }
+            }
+        }
+        return result;
+    }
+
+    private static L0Case caseOf(String id, String result, String detail) {
+        return new L0Case(id, result, detail);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> tools(Map<String, Object> manifest) {
+        Object value = manifest.get("tools");
+        return value instanceof List<?> list ? list.stream().filter(Map.class::isInstance)
+                .map(item -> (Map<String, Object>) item).toList() : List.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private static List<?> list(Object value) {
+        return value instanceof List<?> list ? list : List.of();
+    }
+
+    private static int number(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    private static double similarity(String left, String right) {
+        Set<String> a = grams(left);
+        Set<String> b = grams(right);
+        if (a.isEmpty() || b.isEmpty()) return 0;
+        Set<String> intersection = new LinkedHashSet<>(a);
+        intersection.retainAll(b);
+        Set<String> union = new LinkedHashSet<>(a);
+        union.addAll(b);
+        return (double) intersection.size() / union.size();
+    }
+
+    private static Set<String> grams(String value) {
+        String text = value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        Set<String> result = new LinkedHashSet<>();
+        int[] points = text.codePoints().toArray();
+        for (int index = 0; index + 1 < points.length; index++) {
+            result.add(new String(points, index, 2));
+        }
+        return result;
     }
 }

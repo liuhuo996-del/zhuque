@@ -1,7 +1,10 @@
 package com.zhuque.m1_toolpool;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
@@ -24,6 +27,59 @@ public class OutputFieldExtractor {
      * 落库到 tool.output_fields（jsonb 数组）。
      */
     public List<String> extract(Map<String, Object> responseSchema) {
-        throw new UnsupportedOperationException("TODO");
+        if (responseSchema == null || responseSchema.isEmpty()) {
+            return List.of();
+        }
+        Set<String> fields = new LinkedHashSet<>();
+        walk(responseSchema, "", 0, fields);
+        return List.copyOf(fields);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void walk(Map<String, Object> schema, String path, int depth, Set<String> fields) {
+        if (depth >= 6) {
+            if (!path.isBlank()) {
+                fields.add(path + ".*");
+            }
+            return;
+        }
+
+        Object propertiesValue = schema.get("properties");
+        if (propertiesValue instanceof Map<?, ?> properties && !properties.isEmpty()) {
+            for (Map.Entry<?, ?> entry : properties.entrySet()) {
+                String childPath = path.isBlank() ? String.valueOf(entry.getKey())
+                        : path + "." + entry.getKey();
+                if (entry.getValue() instanceof Map<?, ?> child) {
+                    walk((Map<String, Object>) child, childPath, depth + 1, fields);
+                } else {
+                    fields.add(childPath);
+                }
+            }
+            return;
+        }
+
+        Object itemsValue = schema.get("items");
+        if (itemsValue instanceof Map<?, ?> items) {
+            String arrayPath = path.isBlank() ? "[]" : path + "[]";
+            walk((Map<String, Object>) items, arrayPath, depth + 1, fields);
+            return;
+        }
+
+        boolean traversedVariant = false;
+        for (String key : List.of("oneOf", "anyOf", "allOf")) {
+            Object variantsValue = schema.get(key);
+            if (!(variantsValue instanceof List<?> variants)) {
+                continue;
+            }
+            for (Object variant : variants) {
+                if (variant instanceof Map<?, ?> child) {
+                    walk((Map<String, Object>) child, path, depth + 1, fields);
+                    traversedVariant = true;
+                }
+            }
+        }
+        if (!traversedVariant && !path.isBlank()) {
+            fields.add(path);
+        }
     }
 }

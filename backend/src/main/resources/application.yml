@@ -10,6 +10,23 @@ spring:
     locations: classpath:db/migration
 
 zhuque:
+  # M8 发布目标。凭据走环境变量，不写进代码库。
+  higress:
+    console-url: ${HIGRESS_CONSOLE_URL:http://localhost:8001}
+    username: ${HIGRESS_USERNAME:}
+    password: ${HIGRESS_PASSWORD:}
+    # 最低版本要求，DeployPrecheck 用 GET /system/info 校验
+    min-version: "2.2.0"
+    # 无法从 Console 安全探测的部署前置条件必须由运维显式确认；默认 false 会阻止发布。
+    redis-ready: ${ZHUQUE_HIGRESS_REDIS_READY:false}
+    mcp-enabled: ${ZHUQUE_HIGRESS_MCP_ENABLED:false}
+  nacos:
+    server-url: ${NACOS_SERVER_URL:http://localhost:8848}
+    namespace: ${NACOS_NAMESPACE:public}
+    username: ${NACOS_USERNAME:}
+    password: ${NACOS_PASSWORD:}
+    min-version: "3.0.1"
+
   # M9 漂移检测的默认扫描间隔（可配）
   drift:
     spec-scan-interval: 6h

@@ -6,6 +6,9 @@ import java.util.UUID;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.zhuque.m1_toolpool.SpecSyncService;
+import com.zhuque.persistence.ControlPlaneRepository;
+
 /**
  * M9-1 · Spec 漂移检测。
  *
@@ -24,19 +27,41 @@ import org.springframework.stereotype.Component;
 @Component
 public class SpecDriftDetector {
 
+    private final ControlPlaneRepository repository;
+    private final SpecSyncService sync;
+
+    public SpecDriftDetector(ControlPlaneRepository repository, SpecSyncService sync) {
+        this.repository = repository;
+        this.sync = sync;
+    }
+
     /** 功能：定时扫描全部 api_source。间隔可配。 */
     @Scheduled(fixedDelayString = "${zhuque.drift.spec-scan-interval:6h}")
     public void scanAll() {
-        throw new UnsupportedOperationException("TODO");
+        repository.apiSources().forEach(source -> {
+            try {
+                scanOne(source.id());
+            } catch (RuntimeException error) {
+                repository.insertDriftEvent("api_source", source.id(), "spec", java.util.Map.of(
+                        "scanError", error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
+            }
+        });
     }
 
     /** 功能：扫描单个来源（工具池页"重新拉取"也走这里，同一套 diff 逻辑）。 */
     public void scanOne(UUID apiSourceId) {
-        throw new UnsupportedOperationException("TODO");
+        SpecSyncService.SpecDiff diff = sync.refetch(apiSourceId);
+        if (diff != null) {
+            repository.insertDriftEvent("api_source", apiSourceId, "spec", java.util.Map.of(
+                    "addedEndpoints", diff.addedEndpoints(), "removedToolIds", diff.removedToolIds(),
+                    "changedToolIds", diff.changedToolIds(), "breaking", diff.breaking(),
+                    "impactChain", impactChain(apiSourceId),
+                    "action", "仅生成候选 diff；须人工确认后在工具池应用，不自动回归或发布"));
+        }
     }
 
     /** 功能：影响面查询：spec diff 触到的 tool/pack/agent/release 链路。 */
     public List<String> impactChain(UUID apiSourceId) {
-        throw new UnsupportedOperationException("TODO");
+        return repository.impactChain(apiSourceId);
     }
 }

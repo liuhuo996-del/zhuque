@@ -1,8 +1,19 @@
 package com.zhuque.m10_org;
 
+import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
+
+import com.zhuque.m8_deploy.NacosTarget;
+import com.zhuque.persistence.ControlPlaneRepository;
+import com.zhuque.persistence.ControlPlaneRepository.AgentKeyRow;
 
 /**
  * M10 · Key 管理。
@@ -17,20 +28,58 @@ import org.springframework.stereotype.Service;
 @Service
 public class KeyService {
 
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private final ControlPlaneRepository repository;
+    private final NacosTarget secretStore;
+    private final TaskScheduler scheduler;
+
+    @Value("${zhuque.key.rotation-overlap:24h}")
+    private Duration overlap;
+
+    public KeyService(ControlPlaneRepository repository, NacosTarget secretStore, TaskScheduler scheduler) {
+        this.repository = repository;
+        this.secretStore = secretStore;
+        this.scheduler = scheduler;
+    }
+
     public record IssuedKey(String keyRef, String plaintextOnceOnly) {}
 
     /** 功能：为 agent 签发新 key：生成 → 存入密钥托管（KMS/Nacos 加密配置）→ 落 key_ref。 */
     public IssuedKey issue(UUID agentId) {
-        throw new UnsupportedOperationException("TODO");
+        repository.requireAgent(agentId);
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        String plaintext = "zq_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        String keyRef = secretStore.putSecret(agentId, plaintext);
+        try {
+            repository.insertAgentKey(agentId, keyRef);
+        } catch (RuntimeException error) {
+            secretStore.deleteSecret(keyRef);
+            throw error;
+        }
+        return new IssuedKey(keyRef, plaintext);
     }
 
     /** 功能：轮换：签发新 key + 调度旧 key 在重叠窗口结束后吊销。 */
     public IssuedKey rotate(UUID agentId) {
-        throw new UnsupportedOperationException("TODO");
+        List<AgentKeyRow> oldKeys = repository.agentKeys(agentId, true);
+        IssuedKey issued = issue(agentId);
+        Instant revokeAt = Instant.now().plus(overlap);
+        for (AgentKeyRow old : oldKeys) {
+            scheduler.schedule(() -> {
+                secretStore.deleteSecret(old.keyRef());
+                repository.revokeKey(old.id());
+            }, revokeAt);
+        }
+        return issued;
     }
 
     /** 功能：立即吊销该 agent 全部有效 key（suspend/retire 用）。 */
     public void revokeAll(UUID agentId) {
-        throw new UnsupportedOperationException("TODO");
+        List<AgentKeyRow> keys = repository.agentKeys(agentId, true);
+        for (AgentKeyRow key : keys) {
+            secretStore.deleteSecret(key.keyRef());
+        }
+        repository.revokeAllKeys(agentId);
     }
 }

@@ -5,6 +5,8 @@ import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
+import com.zhuque.common.ApiException;
+
 /**
  * M5 · Release 状态机。只允许表内迁移，其余一律拒绝（抛异常，带当前态和目标态）。
  *
@@ -30,11 +32,17 @@ public class ReleaseStateMachine {
      * 「rolled_back 不能直接变 released：回滚版本要重新上线请开新 Release」。
      */
     public void assertTransition(String from, String to) {
-        throw new UnsupportedOperationException("TODO");
+        if (from == null || to == null || !ALLOWED.getOrDefault(from, Set.of()).contains(to)) {
+            String fix = "rolled_back".equals(from) && "released".equals(to)
+                    ? "回滚版本要重新上线请开新 Release"
+                    : "按 draft → candidate → tested → approved → released 的顺序推进";
+            throw ApiException.conflict(String.valueOf(from) + " 不能直接变 " + to, fix);
+        }
     }
 
     /** 功能：某状态下 manifest 是否已冻结（candidate 及之后一律 true）。 */
     public boolean isFrozen(String status) {
-        throw new UnsupportedOperationException("TODO");
+        return Set.of("candidate", "tested", "approved", "released", "superseded", "rolled_back")
+                .contains(status);
     }
 }
