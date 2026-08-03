@@ -5,6 +5,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.zhuque.common.AgentNames;
 import com.zhuque.common.ApiException;
@@ -40,7 +41,8 @@ public class AgentService {
             String name,
             String slug,
             String description,     // 职责描述 / system prompt 原文
-            String forbiddenNotes) { // 明确禁止的事，独立字段，不混进描述
+            String forbiddenNotes,
+            String operator) {       // 控制面操作人，仅用于辅助审计，不进入 agent 核心字段
     }
 
     /**
@@ -48,6 +50,7 @@ public class AgentService {
      * 校验 slug 格式（[a-z0-9-]）与部门内唯一性；生成并固化 mcp_url；status=draft。
      * 返回新 agent 的 id。
      */
+    @Transactional
     public UUID create(CreateAgentCmd cmd) {
         if (cmd == null || cmd.departmentId() == null) {
             throw ApiException.badRequest("departmentId 不能为空", "选择数字部门后再创建员工");
@@ -64,8 +67,12 @@ public class AgentService {
             throw ApiException.conflict("该部门已存在 slug=" + slug + " 的数字员工", "换一个 slug；已创建的 slug 不可修改");
         }
         String mcpUrl = AgentNames.mcpUrl(publicBaseUrl, department.slug(), slug);
-        return repository.insertAgent(cmd.departmentId(), cmd.name().trim(), slug,
+        UUID id = repository.insertAgent(cmd.departmentId(), cmd.name().trim(), slug,
                 safe(cmd.description()), safe(cmd.forbiddenNotes()), mcpUrl);
+        String actor = cmd.operator() == null || cmd.operator().isBlank() ? "console-user" : cmd.operator().trim();
+        repository.insertAuditEvent(actor, "create", "agent", id, java.util.Map.of(
+            "name", cmd.name().trim(), "slug", slug, "departmentId", cmd.departmentId().toString()));
+        return id;
     }
 
     /**

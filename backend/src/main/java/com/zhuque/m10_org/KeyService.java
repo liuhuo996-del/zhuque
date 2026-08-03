@@ -46,7 +46,7 @@ public class KeyService {
 
     /** 功能：为 agent 签发新 key：生成 → 存入密钥托管（KMS/Nacos 加密配置）→ 落 key_ref。 */
     public IssuedKey issue(UUID agentId) {
-        repository.requireAgent(agentId);
+        repository.requireAgentEditable(agentId);
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String plaintext = "zq_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);

@@ -36,7 +36,7 @@ public class SpecDriftDetector {
     }
 
     /** 功能：定时扫描全部 api_source。间隔可配。 */
-    @Scheduled(fixedDelayString = "${zhuque.drift.spec-scan-interval:6h}")
+    @Scheduled(fixedDelayString = "${zhuque.drift.spec-scan-interval:PT6H}")
     public void scanAll() {
         repository.apiSources().forEach(source -> {
             try {

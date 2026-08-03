@@ -91,7 +91,7 @@ public class ToolDraftGenerator {
         Map<String, String> locations = new LinkedHashMap<>();
         List<Map<String, Object>> headers = new ArrayList<>();
         List<String> query = new ArrayList<>();
-        String url = ep.path();
+        String url = absoluteUrl(ep.serverUrl(), ep.path());
 
         for (Object descriptorValue : ep.parameters().values()) {
             if (!(descriptorValue instanceof Map<?, ?> raw)) {
@@ -173,6 +173,9 @@ public class ToolDraftGenerator {
             }
         }
         template.put("x-arg-locations", locations);
+        if (!ep.l1ControlledFixture().isEmpty()) {
+            template.put("x-zhuque-l1", ep.l1ControlledFixture());
+        }
         return new ToolDraft(name, ep.summary() == null ? "" : ep.summary(), inputSchema,
                 template, ep.method().toUpperCase(), ep.path(), outputFieldExtractor.extract(ep.responseSchema()));
     }
@@ -180,6 +183,15 @@ public class ToolDraftGenerator {
     private static String replacePathPlaceholder(String url, String name, String expression) {
         return url.replace("{" + name + "}", expression)
                 .replace("{" + name + "+}", expression);
+    }
+
+    private static String absoluteUrl(String serverUrl, String path) {
+        String base = serverUrl == null ? "" : serverUrl.replaceAll("/+$", "");
+        String endpoint = path == null ? "" : path;
+        if (base.isBlank()) {
+            return endpoint;
+        }
+        return base + (endpoint.startsWith("/") ? endpoint : "/" + endpoint);
     }
 
     private static String jsonBodyTemplate(List<String> fields) {

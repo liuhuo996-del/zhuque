@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAgents, fetchReleases } from '@/mock/api'
+import { fetchAgents, fetchReleases } from '@/lib/api'
 import { useDepartment } from '@/state/department'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'
@@ -19,6 +19,7 @@ export function Releases() {
 
   // 门禁列：全部通过显示 n/n；有阻断则指出是哪条规则。
   function gateSummary(r: Release) {
+    if (r.gates.length === 0) return <span className="text-xs text-ink-faint">尚未判定</span>
     const blocked = r.gates.find((g) => g.verdict === 'block')
     if (blocked) {
       return <span className="text-xs font-medium text-block">被 {blocked.ruleId} 规则阻断</span>

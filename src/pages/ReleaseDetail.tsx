@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { fetchAgents, fetchRelease, fetchReleases } from '@/mock/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  approveRelease, fetchAgents, fetchRelease, fetchReleases, publishRelease, rollbackRelease, type ApiError,
+} from '@/lib/api'
 import { StepBar, type Step } from '@/components/ui/StepBar'
 import { JsonBlock } from '@/components/ui/JsonBlock'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'
 import { Button } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { useToast } from '@/components/ui/Toast'
 import { cn, copyText, formatDate, shortHash } from '@/lib/utils'
 import type { Release, ReleaseStatus, TestCase } from '@/types'
@@ -19,10 +22,36 @@ const statusLabel: Record<ReleaseStatus, string> = {
 export function ReleaseDetail() {
   const { id = '' } = useParams()
   const toast = useToast()
+  const queryClient = useQueryClient()
   const release = useQuery({ queryKey: ['release', id], queryFn: () => fetchRelease(id) })
   const all = useQuery({ queryKey: ['releases', 'all'], queryFn: () => fetchReleases('all') })
   const agents = useQuery({ queryKey: ['agents', 'all'], queryFn: () => fetchAgents('all') })
   const [confirmAction, setConfirmAction] = useState<'approve' | 'publish' | 'rollback' | null>(null)
+  const [publishedKey, setPublishedKey] = useState<{ key: string; mcpUrl: string } | null>(null)
+  const action = useMutation({
+    mutationFn: async (kind: 'approve' | 'publish' | 'rollback') => {
+      if (kind === 'approve') {
+        await approveRelease(id, release.data?.manifestHash ?? '')
+        return null
+      }
+      if (kind === 'publish') return publishRelease(id)
+      await rollbackRelease(id)
+      return null
+    },
+    onSuccess: async (result, kind) => {
+      if (kind === 'publish' && result?.plaintextKeyOnceOnly) {
+        setPublishedKey({ key: result.plaintextKeyOnceOnly, mcpUrl: result.mcpUrl })
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['release', id] }),
+        queryClient.invalidateQueries({ queryKey: ['releases'] }),
+        queryClient.invalidateQueries({ queryKey: ['agents'] }),
+        queryClient.invalidateQueries({ queryKey: ['audit-events'] }),
+      ])
+      setConfirmAction(null)
+      toast(kind === 'approve' ? 'Release 已批准' : kind === 'publish' ? 'Release 已发布' : '已提交回滚')
+    },
+  })
 
   const r = release.data
   // 上一版：同 agent、创建时间早于本版的最近一版（diff 开关用）
@@ -76,6 +105,7 @@ export function ReleaseDetail() {
           )}
           {r.status === 'released' && <span className="text-xs text-pass">当前线上版本</span>}
         </div>
+        {action.error && <div className="mt-3"><ErrorState compact what={(action.error as ApiError).what} fix={(action.error as ApiError).fix} /></div>}
         {confirmAction && (
           <div className="mt-3 rounded border border-line bg-canvas p-3 text-sm">
             {confirmAction === 'approve' && (
@@ -100,16 +130,26 @@ export function ReleaseDetail() {
             <div className="mt-3 flex gap-2">
               <Button
                 variant="primary" size="sm"
-                onClick={() => {
-                  toast(confirmAction === 'approve' ? '已批准（mock）' : confirmAction === 'publish' ? '已发布（mock）' : '已回滚（mock）')
-                  setConfirmAction(null)
-                }}
+                disabled={action.isPending}
+                onClick={() => action.mutate(confirmAction)}
               >
-                确认
+                {action.isPending ? '提交中…' : '确认'}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setConfirmAction(null)}>取消</Button>
             </div>
           </div>
+        )}
+        {publishedKey && (
+          <section className="mt-3 rounded border border-warn/40 bg-[var(--warn-tint)] p-3">
+            <p className="text-xs font-medium">初始访问密钥（仅本次显示）</p>
+            <p className="mt-1 text-xs text-ink-muted">将它交给调用方安全保存；朱雀不会再次返回该明文。</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="min-w-0 flex-1 break-all font-mono text-xs select-all">{publishedKey.key}</code>
+              <Button size="sm" onClick={async () => { await copyText(publishedKey.key); toast('已复制初始访问密钥') }}>复制</Button>
+              <Button size="sm" variant="ghost" onClick={() => setPublishedKey(null)}>关闭</Button>
+            </div>
+            <p className="mt-2 font-mono text-[11px] text-ink-muted">MCP URL：{publishedKey.mcpUrl}</p>
+          </section>
         )}
       </div>
 

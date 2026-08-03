@@ -109,6 +109,13 @@ public class EnrichmentService {
         if ("raw".equals(tool.enrichmentStatus())) {
             throw ApiException.conflict("raw 工具不能直接标记 reviewed", "先运行 AI 富化并检查结果，再人工确认");
         }
+        if (tool.deprecatedAt() != null) {
+            throw ApiException.conflict("该工具对应的 endpoint 已从最新 OpenAPI 移除，不能继续复核",
+                    "在能力包中替换该工具；如上游恢复该 endpoint，请重新拉取 spec 后再复核");
+        }
+        if (repository.isTrashed("api_source", tool.apiSourceId())) {
+            throw ApiException.conflict("工具所属 REST API 已在回收站中，不能继续复核", "先恢复 REST API 来源，或保留归档状态并在能力包中替换该工具");
+        }
         repository.confirmToolReview(toolId, reviewer.trim());
         log.info("tool enrichment reviewed: toolId={}, reviewer={}", toolId, reviewer.trim());
     }

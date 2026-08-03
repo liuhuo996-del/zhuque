@@ -39,7 +39,7 @@ public class ConfigDriftDetector {
     }
 
     /** 功能：定时比对全部 active agent 的线上配置与 released 快照。 */
-    @Scheduled(fixedDelayString = "${zhuque.drift.config-scan-interval:6h}")
+    @Scheduled(fixedDelayString = "${zhuque.drift.config-scan-interval:PT6H}")
     public void scanAll() {
         for (var agent : repository.activeAgents()) {
             var release = repository.releasedForAgent(agent.id()).orElse(null);

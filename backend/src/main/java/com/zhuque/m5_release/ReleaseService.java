@@ -41,6 +41,8 @@ public class ReleaseService {
     @Transactional
     public UUID freeze(UUID releaseId, String versionOverride) {
         var release = repository.requireRelease(releaseId);
+        repository.requireAgentEditable(release.agentId());
+        repository.assertReleaseCreatedAfterLastAgentRestore(releaseId);
         stateMachine.assertTransition(release.status(), "candidate");
         var compiled = compiler.compile(release.agentId());
         var previous = repository.previousRelease(release.agentId(), releaseId).orElse(null);
@@ -64,7 +66,11 @@ public class ReleaseService {
      */
     @Transactional
     public void approve(UUID releaseId, String approver, String expectedManifestHash) {
-        var release = repository.requireRelease(releaseId);
+        // 与开始/完成测试、门禁判定共用 Release 行锁。审批一旦通过，任何后续重跑或
+        // 门禁改写都会在状态检查处被拒绝，而不会产生“批准中的半途证据”。
+        var release = repository.lockRelease(releaseId);
+        repository.requireAgentEditable(release.agentId());
+        repository.assertReleaseCreatedAfterLastAgentRestore(releaseId);
         stateMachine.assertTransition(release.status(), "approved");
         if (approver == null || approver.isBlank()) {
             throw ApiException.badRequest("审批人不能为空", "使用当前登录人的可审计身份审批");
@@ -72,6 +78,9 @@ public class ReleaseService {
         if (expectedManifestHash == null || !expectedManifestHash.equals(release.manifestHash())) {
             throw ApiException.conflict("审批内容已变化，manifest_hash 不匹配", "刷新证据包并重新审批");
         }
+        // GateEngine 也会复核；这里保留独立的硬性防线，避免未来门禁规则调整时放宽
+        // L0/L1 完整运行和“无 running run”的审批前提。
+        repository.requireCoreTestsCompleted(releaseId);
         if (!gates.canApprove(releaseId)) {
             throw ApiException.conflict("Release 仍有未通过的 BLOCK 门禁", "修复问题并重跑门禁，或由责任人填写理由豁免");
         }

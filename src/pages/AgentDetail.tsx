@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   fetchAgent, fetchAgentIntents, fetchAgentKeys, fetchDriftEvents, fetchPacks, fetchReleases, fetchTools,
-} from '@/mock/api'
+  rotateAgentKey, type ApiError,
+} from '@/lib/api'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EffectBadge } from '@/components/ui/EffectBadge'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'
 import { Button } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { useToast } from '@/components/ui/Toast'
 import { cn, copyText, formatDate, shortHash } from '@/lib/utils'
 import type { Release, Tool } from '@/types'
@@ -26,6 +28,8 @@ export function AgentDetail() {
   const [params, setParams] = useSearchParams()
   const tab = params.get('tab') ?? 'overview'
   const toast = useToast()
+  const queryClient = useQueryClient()
+  const [issuedKey, setIssuedKey] = useState<{ keyRef: string; plaintextOnceOnly: string } | null>(null)
 
   const agent = useQuery({ queryKey: ['agent', id], queryFn: () => fetchAgent(id) })
   const intents = useQuery({ queryKey: ['intents', id], queryFn: () => fetchAgentIntents(id) })
@@ -34,6 +38,14 @@ export function AgentDetail() {
   const drifts = useQuery({ queryKey: ['drifts'], queryFn: fetchDriftEvents })
   const packsQ = useQuery({ queryKey: ['packs', 'all'], queryFn: () => fetchPacks('all') })
   const toolsQ = useQuery({ queryKey: ['tools'], queryFn: fetchTools })
+  const rotate = useMutation({
+    mutationFn: () => rotateAgentKey(id),
+    onSuccess: async (result) => {
+      setIssuedKey(result)
+      await queryClient.invalidateQueries({ queryKey: ['keys', id] })
+      toast('密钥已轮换。请立即保存新密钥；关闭此提示后无法再次查看。')
+    },
+  })
 
   if (agent.isLoading) return <SkeletonTable rows={4} />
   if (!agent.data) return <p className="text-sm text-ink-muted">数字员工不存在。回到列表重新进入。</p>
@@ -146,7 +158,24 @@ export function AgentDetail() {
 
       {tab === 'keys' && (
         <div className="flex max-w-3xl flex-col gap-3">
-          <p className="text-xs text-ink-muted">只显示 key 引用与轮换时间。明文 key 只在创建瞬间显示一次，之后任何界面都不再出现。</p>
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-xs leading-5 text-ink-muted">只显示 key 引用与轮换时间。轮换会向已配置的密钥托管目标签发新 key，明文只在本次结果中显示一次。</p>
+            <Button size="sm" className="shrink-0" disabled={a.status === 'retired' || keys.isLoading || rotate.isPending} onClick={() => rotate.mutate()}>
+              {rotate.isPending ? '处理中…' : (keys.data ?? []).length ? '轮换 key' : '签发首个 key'}
+            </Button>
+          </div>
+          {issuedKey && (
+            <section className="rounded border border-warn/40 bg-[var(--warn-tint)] p-3">
+              <p className="text-xs font-medium">新 key（仅本次显示）</p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="min-w-0 flex-1 break-all font-mono text-xs select-all">{issuedKey.plaintextOnceOnly}</code>
+                <Button size="sm" onClick={async () => { await copyText(issuedKey.plaintextOnceOnly); toast('已复制新 key') }}>复制</Button>
+                <Button size="sm" variant="ghost" onClick={() => setIssuedKey(null)}>关闭</Button>
+              </div>
+              <p className="mt-2 font-mono text-[11px] text-ink-muted">引用：{issuedKey.keyRef}</p>
+            </section>
+          )}
+          {rotate.error && <ErrorState compact what={(rotate.error as ApiError).what} fix={(rotate.error as ApiError).fix} />}
           {(keys.data ?? []).map((k) => (
             <div key={k.id} className="flex items-center gap-3 rounded border border-line bg-surface px-4 py-3">
               <code className="font-mono text-xs">{k.keyRef}</code>
@@ -154,7 +183,7 @@ export function AgentDetail() {
               {k.revokedAt ? (
                 <span className="ml-auto text-xs text-ink-faint">已吊销 {formatDate(k.revokedAt)}</span>
               ) : (
-                <Button size="sm" className="ml-auto" onClick={() => toast('轮换在 v1 后端接入后可用（mock）')}>轮换</Button>
+                <span className="ml-auto text-xs text-pass">生效中</span>
               )}
             </div>
           ))}

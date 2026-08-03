@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.zhuque.common.ApiException;
 import com.zhuque.persistence.ControlPlaneRepository;
@@ -37,17 +38,25 @@ public class GateEngine {
      * 功能：对 Release 跑全部启用的规则，逐条落 gate_decision，
      * 返回汇总（含规则集版本号）。已有豁免记录的规则保持 waived 不重判。
      */
+    @Transactional
     public GateSummary judge(UUID releaseId) {
-        repository.requireRelease(releaseId);
+        repository.lockReleaseGateMutable(releaseId);
+        return judgeLocked(releaseId);
+    }
+
+    /** 调用方已持有 Release 行锁；同一事务内的判定只能追加，不能覆写历史。 */
+    private GateSummary judgeLocked(UUID releaseId) {
         List<Decision> decisions = rules.stream().map(rule -> {
             var existing = repository.gateDecision(releaseId, rule.id()).orElse(null);
             if (existing != null && "waived".equals(existing.verdict())) {
-                return new Decision(rule.id(), rule.severity(), "waived", "人工豁免",
+                String detail = String.valueOf(existing.detail().getOrDefault("message", "人工豁免"));
+                return new Decision(rule.id(), rule.severity(), "waived", detail,
                         existing.waivedBy(), existing.waiverReason());
             }
             GateRule.Verdict verdict = rule.evaluate(releaseId, defaultConfig());
             String value = verdict.pass() ? "pass" : "fail";
-            repository.replaceGateDecision(releaseId, rule.id(), value);
+            repository.appendGateDecision(releaseId, rule.id(), value,
+                    Map.of("message", verdict.detail(), "severity", rule.severity()), RULE_SET_VERSION, "system");
             return new Decision(rule.id(), rule.severity(), value, verdict.detail(), null, null);
         }).toList();
         return new GateSummary(RULE_SET_VERSION, decisions);
@@ -57,7 +66,9 @@ public class GateEngine {
      * 功能：人工豁免一条 BLOCK。waivedBy / reason 必填（空理由直接拒绝），
      * 更新对应 gate_decision 的 verdict=waived。
      */
+    @Transactional
     public void waive(UUID releaseId, String ruleId, String waivedBy, String reason) {
+        repository.lockReleaseGateMutable(releaseId);
         GateRule rule = rules.stream().filter(candidate -> candidate.id().equals(ruleId)).findFirst()
                 .orElseThrow(() -> ApiException.notFound("门禁规则 " + ruleId));
         if (!"BLOCK".equals(rule.severity())) {
@@ -66,17 +77,21 @@ public class GateEngine {
         if (waivedBy == null || waivedBy.isBlank() || reason == null || reason.isBlank()) {
             throw ApiException.badRequest("豁免人和理由不能为空", "填写可审计的责任人和业务理由");
         }
-        repository.waiveGate(releaseId, ruleId, waivedBy.trim(), reason.trim());
+        repository.waiveGate(releaseId, ruleId, waivedBy.trim(), reason.trim(),
+                Map.of("message", "人工豁免", "reason", reason.trim(), "severity", rule.severity()), RULE_SET_VERSION);
     }
 
     /** 功能：能否进入 approved：所有 BLOCK 规则 pass 或 waived。M5.approve 前置调用。 */
+    @Transactional
     public boolean canApprove(UUID releaseId) {
-        if (repository.gateDecisions(releaseId).isEmpty()) {
-            judge(releaseId);
-        }
+        // 这里必须再次锁定并核验完整 L0/L1 run：不能只信任此前已写入的 pass。
+        // 这样审批与测试重跑、门禁重判互斥，半途证据无法进入 approved。
+        repository.lockReleaseGateMutable(releaseId);
+        repository.requireCoreTestsCompleted(releaseId);
+        GateSummary summary = judgeLocked(releaseId);
         Map<String, String> severities = rules.stream().collect(java.util.stream.Collectors.toMap(
             GateRule::id, GateRule::severity));
-        return repository.gateDecisions(releaseId).stream()
+        return summary.decisions().stream()
             .filter(decision -> "BLOCK".equals(severities.get(decision.ruleId())))
             .allMatch(decision -> "pass".equals(decision.verdict()) || "waived".equals(decision.verdict()));
     }

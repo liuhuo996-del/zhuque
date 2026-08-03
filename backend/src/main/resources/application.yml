@@ -9,6 +9,10 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# 本机 8080 通常由 Higress 网关占用，控制面默认使用独立端口。
+server:
+  port: ${SERVER_PORT:8081}
+
 zhuque:
   # M8 发布目标。凭据走环境变量，不写进代码库。
   higress:
@@ -29,8 +33,13 @@ zhuque:
 
   # M9 漂移检测的默认扫描间隔（可配）
   drift:
-    spec-scan-interval: 6h
-    config-scan-interval: 6h
+    spec-scan-interval: PT6H
+    config-scan-interval: PT6H
+  testing:
+    # 正式 L1 只允许向这里显式列出的 test/staging origin 出网（逗号分隔）。
+    # 默认空值等于 deny-all，避免 env_profile 被误标为 test 后访问生产或内网。
+    # 例：https://staging-api.example.com,http://localhost:19080
+    allowed-origins: ${ZHUQUE_TESTING_ALLOWED_ORIGINS:}
   # M10 Key 轮换后旧 key 的保留重叠窗口
   key:
     rotation-overlap: 24h

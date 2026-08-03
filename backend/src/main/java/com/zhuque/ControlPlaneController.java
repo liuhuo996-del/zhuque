@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -80,13 +81,20 @@ public class ControlPlaneController {
 
     @PostMapping("/departments")
     @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
     public Map<String, UUID> createDepartment(@RequestBody DepartmentInput input) {
-        return Map.of("id", departments.create(input.name(), input.slug()));
+        UUID id = departments.create(input.name(), input.slug());
+        String actor = input.operator() == null || input.operator().isBlank()
+            ? "console-user" : input.operator().trim();
+        repository.insertAuditEvent(actor, "create", "department", id,
+            Map.of("name", input.name().trim(), "slug", input.slug().trim()));
+        return Map.of("id", id);
     }
 
     @GetMapping("/packs")
-    public List<ControlPlaneRepository.PackRow> packs(@RequestParam(required = false) UUID department) {
-        return repository.packs(department);
+    public List<PackView> packs(@RequestParam(required = false) UUID department) {
+        return repository.packs(department).stream().map(pack -> new PackView(pack,
+                repository.toolIdsForPack(pack.id()), repository.agentIdsForPack(pack.id()))).toList();
     }
 
     @PostMapping("/packs")
@@ -112,7 +120,7 @@ public class ControlPlaneController {
     @PostMapping("/agents/{agentId}/packs/{packId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void attachPack(@PathVariable UUID agentId, @PathVariable UUID packId) {
-        repository.requireAgent(agentId);
+        repository.requireAgentEditable(agentId);
         repository.attachPack(agentId, packId);
     }
 
@@ -129,7 +137,9 @@ public class ControlPlaneController {
     @GetMapping("/releases/{id}")
     public ReleaseDetail release(@PathVariable UUID id) {
         return new ReleaseDetail(repository.requireRelease(id), repository.testReports(id, null),
-                repository.gateDecisions(id), repository.approvals(id));
+                repository.gateDecisions(id), repository.approvals(id), repository.deployRecords(id),
+                repository.testRunHistory(id), repository.testReportHistory(id, null),
+                repository.gateDecisionHistory(id));
     }
 
     @PostMapping("/releases")
@@ -150,7 +160,7 @@ public class ControlPlaneController {
     }
 
     @PostMapping("/releases/{id}/tests/l1")
-    public Map<String, String> runL1(@PathVariable UUID id, @RequestParam(defaultValue = "mock") String target) {
+    public Map<String, String> runL1(@PathVariable UUID id, @RequestParam(defaultValue = "live") String target) {
         return Map.of("jobId", l1.run(id, target));
     }
 
@@ -161,14 +171,7 @@ public class ControlPlaneController {
 
     @PostMapping("/releases/{id}/tests/complete")
     public void completeTests(@PathVariable UUID id) {
-        var release = repository.requireRelease(id);
-        if (!"candidate".equals(release.status())) {
-            throw ApiException.conflict("只有 candidate 可以完成测试", "刷新 Release 状态");
-        }
-        if (repository.testReports(id, "L0").isEmpty() || repository.testReports(id, "L1").isEmpty()) {
-            throw ApiException.conflict("L0/L1 证据不完整", "至少完成 L0 和默认 mock L1");
-        }
-        repository.transitionRelease(id, "candidate", "tested");
+        repository.completeReleaseTests(id);
     }
 
     @PostMapping("/releases/{id}/gates")
@@ -229,7 +232,7 @@ public class ControlPlaneController {
 
     @PostMapping("/agents/{id}/retire")
     public void retire(@PathVariable UUID id, @RequestBody OperatorInput input) {
-        lifecycle.retire(id, input.operator());
+        lifecycle.retire(id, input.operator(), input.reason());
     }
 
     @PostMapping("/agents/{id}/drift/repair")
@@ -237,7 +240,19 @@ public class ControlPlaneController {
         drift.repairByReplay(id, input.operator());
     }
 
-    public record DepartmentInput(String name, String slug) {}
+    @GetMapping("/drifts")
+    public List<ControlPlaneRepository.DriftEventRow> drifts(
+            @RequestParam(required = false) String status) {
+        return repository.driftEvents(status);
+    }
+
+    @GetMapping("/audit-events")
+    public List<ControlPlaneRepository.AuditEventRow> auditEvents(
+            @RequestParam(defaultValue = "100") int limit) {
+        return repository.auditEvents(limit);
+    }
+
+    public record DepartmentInput(String name, String slug, String operator) {}
     public record PackInput(UUID departmentId, String name, String projectionName,
                             Map<String, Object> visibilityCondition) {}
     public record PackToolsInput(List<UUID> toolIds, String addedBy, Map<UUID, String> reasons,
@@ -247,9 +262,15 @@ public class ControlPlaneController {
     public record VersionInput(String version) {}
     public record WaiverInput(String waivedBy, String reason) {}
     public record ApprovalInput(String approver, String manifestHash) {}
-    public record OperatorInput(String operator) {}
+    public record OperatorInput(String operator, String reason) {}
+    public record PackView(ControlPlaneRepository.PackRow pack, List<UUID> toolIds,
+                           List<UUID> usedByAgentIds) {}
     public record ReleaseDetail(ControlPlaneRepository.ReleaseRow release,
                                 List<ControlPlaneRepository.TestReportRow> tests,
                                 List<ControlPlaneRepository.GateDecisionRow> gates,
-                                List<ControlPlaneRepository.ApprovalRow> approvals) {}
+                                List<ControlPlaneRepository.ApprovalRow> approvals,
+                                List<ControlPlaneRepository.DeployRecordRow> deploys,
+                                List<ControlPlaneRepository.TestRunRow> testRuns,
+                                List<ControlPlaneRepository.TestReportRow> testHistory,
+                                List<ControlPlaneRepository.GateDecisionRow> gateHistory) {}
 }

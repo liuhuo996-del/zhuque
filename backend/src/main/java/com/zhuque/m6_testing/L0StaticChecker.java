@@ -10,12 +10,13 @@ import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.zhuque.persistence.ControlPlaneRepository;
 
 /**
- * M6-L0 · 静态检查。零外部依赖、秒级、确定性 100%——企业没有 staging 时，
- * L0+L1(mock) 必须足以跑完整条发布流程。
+ * M6-L0 · 静态检查。零外部依赖、秒级、确定性 100%。
+ * 它是正式测试链的一层，但不能替代 L1 对已配置测试/预发上游的真实契约验证。
  *
  * 检查项清单（每项一个 case，逐条落 test_report，layer=L0）：
  * - 每个参数是否有 description；enum 是否有值域
@@ -49,8 +50,11 @@ public class L0StaticChecker {
      * 纯内存，输入是冻结后的 manifest（不查外部服务）。
      * caseId 命名规范：L0-{检查项}-{tool名}，前端按此分组展示。
      */
+    // completeTestRun 会把覆盖不完整的 run 标为 failed 并抛出 ApiException；该失败记录
+    // 本身是审计证据，不能被外层 L0 事务回滚掉。
+    @Transactional(noRollbackFor = com.zhuque.common.ApiException.class)
     public List<L0Case> run(UUID releaseId) {
-        var release = repository.requireRelease(releaseId);
+        var release = repository.requireReleaseTestable(releaseId);
         List<Map<String, Object>> tools = tools(release.manifest());
         List<L0Case> result = new ArrayList<>();
         int totalTokens = 0;
@@ -77,6 +81,10 @@ public class L0StaticChecker {
                 sensitive.isEmpty() ? "未命中敏感字段" : "命中敏感字段：" + sensitive));
             String effect = String.valueOf(tool.get("effect"));
             Map<String, Object> template = map(tool.get("requestTemplate"));
+            String requestUrl = String.valueOf(template.getOrDefault("url", ""));
+            boolean absoluteUrl = requestUrl.startsWith("http://") || requestUrl.startsWith("https://");
+            result.add(caseOf("L0-request-url-" + name, absoluteUrl ? "pass" : "fail",
+                absoluteUrl ? "REST 请求模板使用绝对 URL" : "requestTemplate.url 不是绝对地址；在 OpenAPI servers 或导入 baseUrl 中补全"));
             boolean idempotent = !"write".equals(effect) || template.toString().toLowerCase(Locale.ROOT)
                 .contains("idempotency");
             result.add(caseOf("L0-idempotency-" + name, idempotent ? "pass" : "warn",
@@ -89,9 +97,11 @@ public class L0StaticChecker {
             result.add(caseOf("L0-similarity-" + pair.replace(" ↔ ", "-"), "warn",
                 "工具过于相似，Agent 可能误选：" + pair));
         }
-        repository.deleteTestReports(releaseId, "L0");
-        result.forEach(item -> repository.insertTestReport(releaseId, "L0", item.caseId(), item.result(),
+        String runId = UUID.randomUUID().toString();
+        repository.beginTestRun(releaseId, "L0", runId, result.size());
+        result.forEach(item -> repository.insertTestReport(releaseId, "L0", runId, item.caseId(), item.result(),
             Map.of("message", item.detail()), Map.of()));
+        repository.completeTestRun(releaseId, "L0", runId);
         return List.copyOf(result);
     }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAgents, fetchDepartments, fetchPacks, fetchTools } from '@/mock/api'
+import { fetchAgents, fetchDepartments, fetchPacks, fetchTools } from '@/lib/api'
 import { useDepartment } from '@/state/department'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'

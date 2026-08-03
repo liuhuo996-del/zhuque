@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.zhuque.common.ApiException;
 import com.zhuque.common.CanonicalJson;
@@ -33,7 +34,8 @@ import com.zhuque.persistence.ControlPlaneRepository.ToolRow;
 @Service
 public class SpecSyncService {
 
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL).build();
     private final ControlPlaneRepository repository;
     private final OpenApiParser parser;
     private final ToolDraftGenerator draftGenerator;
@@ -63,6 +65,9 @@ public class SpecSyncService {
      */
     public SpecDiff refetch(UUID apiSourceId) {
         ApiSourceRow source = repository.requireApiSource(apiSourceId);
+        if (repository.isTrashed("api_source", apiSourceId)) {
+            throw ApiException.conflict("REST API 已在回收站中，不能重新拉取或修改", "先在回收站恢复来源；恢复后再重新拉取并人工确认变更");
+        }
         if (source.specUrl() == null || source.specUrl().isBlank()) {
             throw ApiException.badRequest("API 来源没有 spec_url", "改为重新上传 OpenAPI 原文，或先补全 spec_url");
         }
@@ -75,7 +80,13 @@ public class SpecSyncService {
 
         OpenApiParser.ParseResult parsed;
         try {
+            // 重新拉取不能再把 spec URL 的 origin 当作导入时的 baseUrl：初次导入可能
+            // 使用了完全不同的测试环境。api_source 的冻结字段没有保存该 baseUrl，宁可
+            // 拒绝不自包含的 spec，也不能静默改写已经审核过的请求模板。
             parsed = parser.parse(specText);
+            requireSelfContainedServers(parsed);
+        } catch (ApiException error) {
+            throw error;
         } catch (RuntimeException error) {
             throw ApiException.badRequest("拉取到的 OpenAPI 无法解析：" + error.getMessage(),
                     "检查 spec_url 是否仍返回 OpenAPI 3.x JSON/YAML，或改为手动上传");
@@ -98,13 +109,21 @@ public class SpecSyncService {
             ToolRow old = currentByEndpoint.get(entry.getKey());
             if (old == null) {
                 added.add(entry.getKey());
-            } else if (definitionChanged(old, entry.getValue())) {
+            } else {
+                boolean definitionChanged = definitionChanged(old, entry.getValue());
+                if (old.deprecatedAt() == null && !definitionChanged) {
+                    continue;
+                }
+                // 上游重新提供此前移除的 endpoint 时复用原 tool id，保留其历史关联；
+                // updateToolDefinition 会清除弃用标记，并让 reviewed 回到 enriched 待复核。
                 changed.add(old.id());
-                breaking |= breakingChange(old.inputSchema(), entry.getValue().inputSchema());
+                if (definitionChanged) {
+                    breaking |= breakingChange(old.inputSchema(), entry.getValue().inputSchema());
+                }
             }
         }
         for (Map.Entry<String, ToolRow> entry : currentByEndpoint.entrySet()) {
-            if (!nextByEndpoint.containsKey(entry.getKey())) {
+            if (!nextByEndpoint.containsKey(entry.getKey()) && entry.getValue().deprecatedAt() == null) {
                 removed.add(entry.getValue().id());
                 breaking = true;
             }
@@ -121,9 +140,13 @@ public class SpecSyncService {
      * - changed → 只更新 input_schema/output_fields/request_template，
      *   保留 description 等富化字段，enrichment_status: reviewed → enriched（需重新复核）
      */
+    @Transactional
     public void applyDiff(UUID apiSourceId, SpecDiff diff) {
         if (diff == null) {
             return;
+        }
+        if (repository.isTrashed("api_source", apiSourceId)) {
+            throw ApiException.conflict("REST API 已在回收站中，不能应用 spec 变更", "先在回收站恢复来源；恢复后重新拉取最新 spec");
         }
         PendingSync sync = pending.get(apiSourceId);
         if (sync == null || !sync.diff().equals(diff)) {
@@ -158,18 +181,30 @@ public class SpecSyncService {
             if (removed == null) {
                 continue;
             }
-            int references = repository.packReferenceCount(toolId);
-            repository.insertDriftEvent("api_source", apiSourceId, "spec", Map.of(
-                    "change", "endpoint_removed",
-                    "toolId", toolId.toString(),
-                    "toolName", removed.name(),
-                    "packReferences", references,
-                    "action", references > 0
-                            ? "工具仍被能力包引用，已保留记录；请人工迁移后再处理"
-                            : "工具记录已保留用于历史 Release 对账，不会物理删除"));
+            markRemovedEndpoint(apiSourceId, removed);
         }
         repository.updateApiSourceHash(apiSourceId, sync.specHash());
         pending.remove(apiSourceId);
+    }
+
+    /**
+     * OpenAPI 移除了 endpoint 时只弃用 tool，不删除它。这样冻结 Release 的 manifest
+     * 仍可追溯到原始工具定义，同时 tools()/toolsByIds() 不会再把它交给新的配置。
+     * 包可见以便回归测试验证这条数据保留边界。
+     */
+    void markRemovedEndpoint(UUID apiSourceId, ToolRow removed) {
+        int references = repository.packReferenceCount(removed.id());
+        String reason = "endpoint 已从最新 OpenAPI 移除：" + removed.method() + " " + removed.path();
+        repository.deprecateTool(removed.id(), reason);
+        repository.insertDriftEvent("api_source", apiSourceId, "spec", Map.of(
+                "change", "endpoint_removed",
+                "toolId", removed.id().toString(),
+                "toolName", removed.name(),
+                "packReferences", references,
+                "toolDeprecated", true,
+                "action", references > 0
+                        ? "工具已弃用但仍被能力包引用；请人工迁移后再创建新的 Release"
+                        : "工具已弃用并从普通工具池隐藏；历史 Release 快照不受影响"));
     }
 
     public List<OpenApiParser.ParseError> pendingParseErrors(UUID apiSourceId) {
@@ -270,6 +305,37 @@ public class SpecSyncService {
         String slug = value.toLowerCase().replaceAll("([a-z0-9])([A-Z])", "$1-$2")
                 .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
         return slug.isBlank() ? "source" : slug;
+    }
+
+    /**
+     * refetch 只接受 document 自己能给出稳定绝对请求地址的 spec。否则它的行为会依赖
+     * 初次导入时仅存在于请求体中的 baseUrl，重新拉取会产生不可审计的模板漂移。
+     */
+    static void requireSelfContainedServers(OpenApiParser.ParseResult parsed) {
+        if (parsed.endpoints().isEmpty()) {
+            throw ApiException.badRequest("重新拉取的 OpenAPI 没有可导入 endpoint",
+                    "检查 paths 和 operation 是否完整；系统未应用任何变更");
+        }
+        List<String> unresolved = parsed.endpoints().stream()
+                .filter(endpoint -> !absoluteHttpServer(endpoint.serverUrl()))
+                .map(endpoint -> endpoint.method().toUpperCase() + " " + endpoint.path())
+                .limit(5).toList();
+        if (!unresolved.isEmpty()) {
+            throw ApiException.conflict("无法安全重新拉取：OpenAPI 没有自包含的绝对 servers（"
+                    + String.join("、", unresolved) + "）",
+                    "该来源初次导入可能依赖了 REST baseUrl。为避免静默改变请求模板，请在 spec 中配置绝对 "
+                            + "http(s) servers 后重试，或以正确 baseUrl 重新导入为新的来源");
+        }
+    }
+
+    private static boolean absoluteHttpServer(String value) {
+        try {
+            URI uri = URI.create(value);
+            return uri.isAbsolute() && uri.getHost() != null && ("http".equalsIgnoreCase(uri.getScheme())
+                    || "https".equalsIgnoreCase(uri.getScheme()));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private record PendingSync(String specHash, Map<String, ToolDraft> draftsByEndpoint,

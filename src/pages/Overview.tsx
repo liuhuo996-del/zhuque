@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAgents, fetchDriftEvents, fetchReleases } from '@/mock/api'
+import { fetchAgents, fetchDriftEvents, fetchReleases } from '@/lib/api'
 import { useDepartment } from '@/state/department'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'

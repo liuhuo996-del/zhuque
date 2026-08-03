@@ -23,9 +23,9 @@ export interface Department {
 export interface ApiSource {
   id: string
   name: string
-  specUrl: string
+  specUrl: string | null
   specHash: string
-  lastFetchedAt: string
+  lastFetchedAt: string | null
   envProfile: string
   toolTotal: number
   rawCount: number
@@ -94,7 +94,7 @@ export interface GateDecision {
 export interface TestCase {
   layer: 'L0' | 'L1' | 'L2'
   caseId: string
-  result: 'pass' | 'fail' | 'skip'
+  result: 'pass' | 'fail' | 'skip' | 'warn'
   detail: string
 }
 
@@ -173,4 +173,32 @@ export interface Pack {
   toolIds: string[]
   usedByAgentIds: string[]
   createdAt: string
+}
+
+/** 核心模型之外的控制面辅助视图；不改变 CLAUDE.md 的共享实体字段。 */
+export interface TrashMetadata {
+  trashedAt: string
+  trashedBy: string
+  trashReason: string
+}
+
+export type TrashedApiSource = ApiSource & TrashMetadata
+
+export interface AuditEvent {
+  id: string
+  actor: string
+  action: 'create' | 'import' | 'trash' | 'restore' | 'purge' | string
+  resourceType: string
+  resourceId: string
+  detail: Record<string, unknown>
+  occurredAt: string
+}
+
+export interface JobProgress {
+  jobId: string
+  total: number
+  done: number
+  currentStep: string
+  state: 'running' | 'done' | 'failed'
+  error: string | null
 }

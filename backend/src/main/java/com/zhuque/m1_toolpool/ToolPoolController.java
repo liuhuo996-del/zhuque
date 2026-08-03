@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,19 +46,23 @@ import com.zhuque.persistence.ControlPlaneRepository.ToolRow;
 @RequestMapping("/api")
 public class ToolPoolController {
 
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL).build();
     private final OpenApiParser parser;
     private final ToolDraftGenerator draftGenerator;
+    private final ApiSourceLifecycleService lifecycle;
     private final EnrichmentService enrichmentService;
     private final SpecSyncService specSyncService;
     private final StaticAnnotator annotator;
     private final ControlPlaneRepository repository;
 
     public ToolPoolController(OpenApiParser parser, ToolDraftGenerator draftGenerator,
+                              ApiSourceLifecycleService lifecycle,
                               EnrichmentService enrichmentService, SpecSyncService specSyncService,
                               StaticAnnotator annotator, ControlPlaneRepository repository) {
         this.parser = parser;
         this.draftGenerator = draftGenerator;
+        this.lifecycle = lifecycle;
         this.enrichmentService = enrichmentService;
         this.specSyncService = specSyncService;
         this.annotator = annotator;
@@ -72,23 +77,34 @@ public class ToolPoolController {
         if (request == null || request.name() == null || request.name().isBlank()) {
             throw ApiException.badRequest("API 来源名称不能为空", "填写一个稳定的公司内来源名称");
         }
-        String specText = request.specText();
-        if (specText == null || specText.isBlank()) {
-            if (request.specUrl() == null || request.specUrl().isBlank()) {
-                throw ApiException.badRequest("specUrl 与 specText 不能同时为空", "提供 OpenAPI URL 或上传后的原文");
-            }
-            specText = fetch(request.specUrl());
+        boolean uploaded = request.specText() != null && !request.specText().isBlank();
+        boolean remote = request.specUrl() != null && !request.specUrl().isBlank();
+        if (!uploaded && !remote) {
+            throw ApiException.badRequest("specUrl 与 specText 不能同时为空", "提供 OpenAPI URL 或上传后的原文");
         }
-        OpenApiParser.ParseResult result = parser.parse(specText);
+        if (uploaded && remote) {
+            throw ApiException.badRequest("一次导入只能使用一个 OpenAPI 来源", "URL 与上传文件二选一，避免后续重新拉取到与已导入内容不同的文档");
+        }
+        String specText = uploaded ? request.specText() : fetch(request.specUrl());
+        OpenApiParser.ParseResult result;
+        try {
+            result = parser.parse(specText, fallbackServerUrl(request));
+        } catch (ApiException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw ApiException.badRequest("OpenAPI 文档无法解析：" + safeMessage(error),
+                    "检查 OpenAPI 3.x JSON/YAML、$ref 和 servers；修正后重新导入");
+        }
         if (result.endpoints().isEmpty()) {
             throw ApiException.badRequest("OpenAPI 中没有可导入的 endpoint",
                     result.errors().isEmpty() ? "检查 paths 是否为空" : result.errors().get(0).message());
         }
+        validateEndpointUrls(result.endpoints());
         String sourceSlug = request.slug() == null || request.slug().isBlank()
                 ? slug(request.name()) : slug(request.slug());
         List<ToolDraft> drafts = draftGenerator.generateAll(sourceSlug, result.endpoints());
         UUID sourceId = repository.insertApiSource(request.name().trim(), blankToNull(request.specUrl()),
-                CanonicalJson.sha256(specText), defaultValue(request.envProfile(), "prod"));
+                CanonicalJson.sha256(specText), environmentProfile(request.envProfile()));
         int inserted = 0;
         for (ToolDraft draft : drafts) {
             String name = uniqueName(draft.name());
@@ -98,18 +114,47 @@ public class ToolPoolController {
                     draft.method(), draft.path(), "unknown", "raw", draft.outputFields(), sensitivity, tokenCost);
             inserted++;
         }
+        String actor = request.operator() == null || request.operator().isBlank()
+                ? "console-user" : request.operator().trim();
+        repository.insertAuditEvent(actor, "import", "api_source", sourceId, Map.of(
+                "name", request.name().trim(), "specHash", CanonicalJson.sha256(specText),
+                "importedTools", inserted, "parseErrors", result.errors().size()));
         return new ImportResult(sourceId, inserted, result.errors());
     }
 
     @GetMapping("/sources")
-    public List<SourceView> sources() {
-        return repository.apiSources().stream().map(source -> {
+    public List<SourceView> sources(@RequestParam(defaultValue = "false") boolean trash) {
+        var sourceRows = trash ? repository.trashedApiSources() : repository.apiSources();
+        return sourceRows.stream().map(source -> {
             List<ToolRow> tools = repository.toolsBySource(source.id());
             long raw = tools.stream().filter(tool -> "raw".equals(tool.enrichmentStatus())).count();
+            var lifecycleRow = repository.lifecycle("api_source", source.id()).orElse(null);
             return new SourceView(source.id(), source.name(), source.specUrl(), source.specHash(),
                     source.lastFetchedAt() == null ? null : source.lastFetchedAt().toString(),
-                    source.envProfile(), tools.size(), raw);
+                    source.envProfile(), tools.size(), raw,
+                    lifecycleRow == null ? null : lifecycleRow.changedAt().toString(),
+                    lifecycleRow == null ? null : lifecycleRow.changedBy(),
+                    lifecycleRow == null ? null : lifecycleRow.reason());
         }).toList();
+    }
+
+    /** DELETE 只移入回收站；核心来源、工具和历史 Release 证据全部保留。 */
+    @DeleteMapping("/sources/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void trashSource(@PathVariable UUID id, @RequestBody(required = false) LifecycleRequest request) {
+        lifecycle.trash(id, operator(request), request == null ? null : request.reason());
+    }
+
+    @PostMapping("/sources/{id}/restore")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void restoreSource(@PathVariable UUID id, @RequestBody(required = false) LifecycleRequest request) {
+        lifecycle.restore(id, operator(request));
+    }
+
+    @DeleteMapping("/sources/{id}/purge")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void purgeSource(@PathVariable UUID id, @RequestBody(required = false) LifecycleRequest request) {
+        lifecycle.purge(id, operator(request));
     }
 
     @PostMapping("/sources/{id}/refetch")
@@ -160,7 +205,8 @@ public class ToolPoolController {
 
     private String fetch(String url) {
         try {
-            HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(url))
+            URI uri = absoluteHttpUri(url, "OpenAPI URL", "使用 http:// 或 https:// 开头的可访问 OpenAPI 地址");
+            HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri)
                     .timeout(Duration.ofSeconds(30)).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 throw ApiException.unavailable("拉取 spec 失败：GET " + url + " 返回 " + response.statusCode(),
@@ -206,16 +252,91 @@ public class ToolPoolController {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 
-    public record ImportSourceRequest(String name, String slug, String specUrl, String specText, String envProfile) {}
+    private static String fallbackServerUrl(ImportSourceRequest request) {
+        String configured = blankToNull(request.baseUrl());
+        if (configured != null) {
+            return trimTrailingSlash(absoluteHttpUri(configured, "REST API baseUrl",
+                    "使用 http://host:port 或 https://host 形式").toString());
+        }
+        String specUrl = blankToNull(request.specUrl());
+        if (specUrl == null) {
+            return null;
+        }
+        URI uri = absoluteHttpUri(specUrl, "OpenAPI URL", "使用 http:// 或 https:// 开头的可访问 OpenAPI 地址");
+        int port = uri.getPort();
+        return uri.getScheme() + "://" + uri.getHost() + (port < 0 ? "" : ":" + port);
+    }
+
+    /** 正式 L1 契约测试只能使用可发起真实请求的 HTTP(S) endpoint。 */
+    private static void validateEndpointUrls(List<OpenApiParser.ParsedEndpoint> endpoints) {
+        List<String> invalid = endpoints.stream().filter(endpoint -> {
+            try {
+                absoluteHttpUri(endpoint.serverUrl(), "endpoint server", "");
+                return false;
+            } catch (ApiException error) {
+                return true;
+            }
+        }).map(endpoint -> endpoint.method().toUpperCase() + " " + endpoint.path()).limit(5).toList();
+        if (!invalid.isEmpty()) {
+            throw ApiException.badRequest("OpenAPI 缺少可正式测试的 REST baseUrl：" + String.join("、", invalid),
+                    "在 OpenAPI servers 中配置绝对 http(s) 地址，或在导入表单填写 REST baseUrl；不会导入无法正式验证的模板");
+        }
+    }
+
+    private static URI absoluteHttpUri(String value, String label, String fix) {
+        try {
+            if (value == null || value.isBlank()) {
+                throw ApiException.badRequest(label + " 不能为空", fix);
+            }
+            URI uri = URI.create(value.trim());
+            String scheme = uri.getScheme();
+            if (!uri.isAbsolute() || uri.getHost() == null
+                    || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+                throw ApiException.badRequest(label + " 不是绝对 HTTP(S) 地址", fix);
+            }
+            return uri;
+        } catch (ApiException error) {
+            throw error;
+        } catch (IllegalArgumentException error) {
+            throw ApiException.badRequest(label + " 格式不合法", fix);
+        }
+    }
+
+    private static String environmentProfile(String value) {
+        String profile = defaultValue(value, "prod").toLowerCase(java.util.Locale.ROOT);
+        if (!List.of("test", "staging", "prod").contains(profile)) {
+            throw ApiException.badRequest("正式测试环境不支持：" + profile,
+                    "选择 test、staging 或 prod；正式 L1 契约测试仅在 test/staging 执行，prod 仅用于来源登记与追溯");
+        }
+        return profile;
+    }
+
+    private static String trimTrailingSlash(String value) {
+        return value.replaceAll("/+$", "");
+    }
+
+    private static String safeMessage(Throwable error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
+    }
+
+    public record ImportSourceRequest(String name, String slug, String specUrl, String specText,
+                                      String baseUrl, String envProfile, String operator) {}
     public record ImportResult(UUID sourceId, int importedTools, List<OpenApiParser.ParseError> parseErrors) {}
     public record RefetchResult(SpecSyncService.SpecDiff diff, List<OpenApiParser.ParseError> parseErrors,
                                 boolean unchanged, boolean applied) {}
     public record ToolIdsRequest(List<UUID> toolIds) {}
     public record ReviewRequest(String reviewer) {}
     public record SourceView(UUID id, String name, String specUrl, String specHash, String lastFetchedAt,
-                             String envProfile, int toolTotal, long rawCount) {}
+                             String envProfile, int toolTotal, long rawCount,
+                             String trashedAt, String trashedBy, String trashReason) {}
     public record ToolView(UUID id, UUID apiSourceId, String name, String description, String method, String path,
                            String effect, String enrichmentStatus, Map<String, Object> inputSchema,
                            Map<String, Object> requestTemplate, List<String> outputFields,
                            List<String> sensitivityFlags, int tokenCost, int refCount) {}
+    public record LifecycleRequest(String operator, String reason) {}
+
+    private static String operator(LifecycleRequest request) {
+        return request == null ? null : request.operator();
+    }
 }

@@ -1,157 +1,130 @@
-import { useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
-import { ProgressBar } from '@/components/ui/ProgressBar'
-import { useToast } from '@/components/ui/Toast'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { SkeletonTable } from '@/components/ui/SkeletonTable'
+import { fetchPrecheck, type ApiError, type PrecheckItem } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-interface CheckItem {
+const BUILTIN_GATES = [
+  { id: 'l0-completeness', name: 'inputSchema 静态完备性', detail: 'L0 静态检查必须通过' },
+  { id: 'l1-contract', name: '正式上游契约测试', detail: '针对 test / staging 上游运行 L1' },
+  { id: 'closure', name: '闭包检查', detail: '每个工具必填参数必须可得' },
+  { id: 'idempotency', name: '写操作幂等性', detail: '写工具必须声明幂等键' },
+  { id: 'sensitive-masking', name: '敏感字段处理', detail: '命中敏感字段的工具须完成人工复核' },
+]
+
+type CheckView = {
   name: string
   state: 'pending' | 'running' | 'ok' | 'fail'
-  detail?: string
+  current: string
   fix?: string
 }
 
-const INITIAL_CHECKS: CheckItem[] = [
-  { name: 'Nacos 版本 ≥ 3.0.1（Admin API）', state: 'pending' },
-  { name: 'Higress 版本（支持同步 Nacos 原生 MCP Server）', state: 'pending' },
-  { name: 'Redis 可达（Higress MCP 功能依赖）', state: 'pending' },
-  { name: 'Higress MCP 功能已 enable', state: 'pending' },
-]
-
 export function Settings() {
-  const toast = useToast()
-  const [checks, setChecks] = useState<CheckItem[]>(INITIAL_CHECKS)
-  const [checking, setChecking] = useState(false)
-  const [rules, setRules] = useState([
-    { id: 'schema-valid', name: '所有 inputSchema 通过校验', on: true, threshold: null as string | null },
-    { id: 'closure', name: '闭包检查通过', on: true, threshold: null },
-    { id: 'budget-tools', name: '工具数上限', on: true, threshold: '20' },
-    { id: 'budget-tokens', name: 'schema token 上限', on: true, threshold: '15000' },
-    { id: 'idempotency', name: '所有 write 工具声明幂等键', on: true, threshold: null },
-    { id: 'sensitive-review', name: '命中敏感字段的工具需 reviewed', on: true, threshold: null },
-    { id: 'delete-forbidden', name: 'delete 工具默认禁止（可豁免）', on: true, threshold: null },
-  ])
+  const precheck = useQuery({
+    queryKey: ['deploy-precheck'],
+    queryFn: fetchPrecheck,
+    enabled: false,
+    retry: false,
+  })
 
-  function runChecks() {
-    setChecking(true)
-    setChecks(INITIAL_CHECKS.map((c) => ({ ...c, state: 'pending' })))
-    const results: CheckItem[] = [
-      { name: INITIAL_CHECKS[0].name, state: 'ok', detail: '3.0.2 · Admin API 可用' },
-      { name: INITIAL_CHECKS[1].name, state: 'ok', detail: '2.1.4' },
-      { name: INITIAL_CHECKS[2].name, state: 'ok', detail: 'redis://higress-redis:6379 · 3ms' },
-      {
-        name: INITIAL_CHECKS[3].name, state: 'fail',
-        detail: 'GET /api/mcp/status 返回 501',
-        fix: 'Higress 未启用 MCP Server 能力。在 higress-config 中设置 mcpServer.enable: true 并重启网关，然后重新检查。',
-      },
+  const checks = useMemo<CheckView[]>(() => {
+    if (precheck.data) return precheck.data.map(checkView)
+    return [
+      { name: 'Nacos Admin API', state: precheck.isFetching ? 'running' : 'pending', current: '' },
+      { name: 'Higress Console', state: precheck.isFetching ? 'running' : 'pending', current: '' },
+      { name: 'Redis', state: precheck.isFetching ? 'running' : 'pending', current: '' },
+      { name: 'MCP Server 能力', state: precheck.isFetching ? 'running' : 'pending', current: '' },
     ]
-    results.forEach((r, i) => {
-      window.setTimeout(() => {
-        setChecks((xs) => xs.map((x, idx) => (idx === i ? r : idx === i + 1 ? { ...x, state: 'running' } : x)))
-        if (i === results.length - 1) setChecking(false)
-      }, (i + 1) * 600)
-    })
-    setChecks((xs) => xs.map((x, idx) => (idx === 0 ? { ...x, state: 'running' } : x)))
-  }
-
-  const doneCount = checks.filter((c) => c.state === 'ok' || c.state === 'fail').length
+  }, [precheck.data, precheck.isFetching])
 
   return (
-    <div className="flex max-w-2xl flex-col gap-5">
-      <h1 className="text-lg font-semibold">设置</h1>
+    <div className="flex max-w-3xl flex-col gap-5">
+      <div>
+        <h1 className="text-lg font-semibold">部署与门禁</h1>
+        <p className="mt-1 text-xs leading-5 text-ink-muted">连接凭据由部署环境安全注入，控制台只执行真实探测并展示结果，不会保存或伪造连接状态。</p>
+      </div>
 
-      {/* Nacos 连接 */}
       <section className="rounded border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Nacos 连接</h2>
-        <p className="mt-1 text-xs text-ink-muted">走 Admin API（client OpenAPI 发布不了配置）。密钥交由 Nacos 加密托管，朱雀只存引用。</p>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Field label="服务地址"><input className="input font-mono text-xs" defaultValue="http://nacos.internal:8848" /></Field>
-          <Field label="命名空间"><input className="input font-mono text-xs" defaultValue="prod" /></Field>
-          <Field label="用户名"><input className="input font-mono text-xs" defaultValue="zhuque-cp" /></Field>
-          <Field label="密码"><input type="password" className="input font-mono text-xs" defaultValue="········" /></Field>
+        <h2 className="text-sm font-semibold">部署目标</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Target name="Nacos" detail="通过 Admin API 发布 MCP 服务定义与加密密钥引用。" />
+          <Target name="Higress" detail="负责 MCP 入口鉴权与运行时流量执行。" />
         </div>
-        <Button size="sm" className="mt-3" onClick={() => toast('Nacos 连接正常：3.0.2（mock）')}>测试连接</Button>
+        <p className="mt-3 rounded border border-line bg-canvas p-3 text-xs leading-5 text-ink-muted">
+          服务地址、命名空间和凭据必须通过后端部署配置设置。为防止未保存的表单值被误认为已生效，这些参数不在控制台中提供本地编辑。
+        </p>
       </section>
 
-      {/* Higress 连接 */}
       <section className="rounded border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">Higress 连接</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <Field label="Console 地址"><input className="input font-mono text-xs" defaultValue="http://higress.internal:8001" /></Field>
-          <Field label="网关入口"><input className="input font-mono text-xs" defaultValue="https://gw.corp.example.com" /></Field>
-          <Field label="consumer group 前缀"><input className="input font-mono text-xs" defaultValue="cg-" /></Field>
-        </div>
-        <Button size="sm" className="mt-3" onClick={() => toast('Higress 连接正常：2.1.4（mock）')}>测试连接</Button>
-      </section>
-
-      {/* 门禁规则 */}
-      <section className="rounded border border-line bg-surface p-4">
-        <h2 className="text-sm font-semibold">门禁规则</h2>
-        <p className="mt-1 text-xs text-ink-muted">硬规则决定 Release 能否发布。关闭或改阈值即刻生效于其后创建的 Release，已冻结的不受影响。</p>
+        <h2 className="text-sm font-semibold">内置发布门禁</h2>
+        <p className="mt-1 text-xs text-ink-muted">以下规则在每个 Release 的证据包中实际执行；规则变更需要走受控部署，不在浏览器中做未持久化的开关。</p>
         <ul className="mt-3 flex flex-col gap-2">
-          {rules.map((r) => (
-            <li key={r.id} className="flex h-9 items-center gap-3 rounded border border-line px-3">
-              <input
-                type="checkbox"
-                checked={r.on}
-                onChange={(e) => setRules((xs) => xs.map((x) => (x.id === r.id ? { ...x, on: e.target.checked } : x)))}
-              />
-              <span className={cn('text-sm', !r.on && 'text-ink-faint line-through')}>{r.name}</span>
-              <code className="font-mono text-[10px] text-ink-faint">{r.id}</code>
-              {r.threshold !== null && (
-                <input
-                  value={r.threshold}
-                  onChange={(e) =>
-                    setRules((xs) => xs.map((x) => (x.id === r.id ? { ...x, threshold: e.target.value.replace(/\D/g, '') } : x)))
-                  }
-                  className="input ml-auto h-6 w-20 text-right font-mono text-xs"
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* 环境前置检查 */}
-      <section className="rounded border border-line bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">环境前置检查</h2>
-          <Button size="sm" variant="primary" disabled={checking} onClick={runChecks}>立即检查</Button>
-        </div>
-        {checking && (
-          <div className="mt-3">
-            <ProgressBar percent={(doneCount / checks.length) * 100} stepName={checks.find((c) => c.state === 'running')?.name ?? '准备检查…'} />
-          </div>
-        )}
-        <ul className="mt-3 flex flex-col gap-2">
-          {checks.map((c) => (
-            <li key={c.name} className="rounded border border-line px-3 py-2">
-              <div className="flex items-center gap-2 text-sm">
-                <span className={cn(
-                  'font-mono text-xs font-medium',
-                  c.state === 'ok' && 'text-pass',
-                  c.state === 'fail' && 'text-block',
-                  (c.state === 'pending' || c.state === 'running') && 'text-ink-faint',
-                )}>
-                  {c.state === 'ok' ? '通过' : c.state === 'fail' ? '失败' : c.state === 'running' ? '检查中' : '待检查'}
-                </span>
-                <span>{c.name}</span>
-                {c.detail && <code className="ml-auto font-mono text-[11px] text-ink-muted">{c.detail}</code>}
+          {BUILTIN_GATES.map((rule) => (
+            <li key={rule.id} className="flex items-center gap-3 rounded border border-line px-3 py-2.5">
+              <span className="font-mono text-xs text-pass">启用</span>
+              <div className="min-w-0">
+                <span className="text-sm">{rule.name}</span>
+                <p className="text-xs text-ink-muted">{rule.detail}</p>
               </div>
-              {c.fix && <p className="mt-1.5 text-xs text-block">{c.fix}</p>}
+              <code className="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{rule.id}</code>
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="rounded border border-line bg-surface p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">正式环境前置检查</h2>
+            <p className="mt-1 text-xs text-ink-muted">实时探测 Nacos、Higress、Redis 与 MCP Server 能力；任一失败都会阻止发布。</p>
+          </div>
+          <Button size="sm" variant="primary" disabled={precheck.isFetching} onClick={() => precheck.refetch()}>
+            {precheck.isFetching ? '检查中…' : precheck.data ? '重新检查' : '执行检查'}
+          </Button>
+        </div>
+        {precheck.isError && <div className="mt-3"><ErrorState compact what={(precheck.error as ApiError).what} fix={(precheck.error as ApiError).fix} /></div>}
+        {precheck.isLoading && !precheck.data ? <div className="mt-3"><SkeletonTable rows={4} cols={2} /></div> : (
+          <ul className="mt-3 flex flex-col gap-2">
+            {checks.map((check) => (
+              <li key={check.name} className="rounded border border-line px-3 py-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className={cn(
+                    'font-mono text-xs font-medium',
+                    check.state === 'ok' && 'text-pass',
+                    check.state === 'fail' && 'text-block',
+                    (check.state === 'pending' || check.state === 'running') && 'text-ink-faint',
+                  )}>
+                    {check.state === 'ok' ? '通过' : check.state === 'fail' ? '失败' : check.state === 'running' ? '检查中' : '待检查'}
+                  </span>
+                  <span>{check.name}</span>
+                  {check.current && <code className="ml-auto font-mono text-[11px] text-ink-muted">{check.current}</code>}
+                </div>
+                {check.fix && check.state === 'fail' && <p className="mt-1.5 text-xs text-block">{check.fix}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Target({ name, detail }: { name: string; detail: string }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-ink-muted">{label}</span>
-      {children}
-    </label>
+    <div className="rounded border border-line p-3">
+      <h3 className="text-sm font-medium">{name}</h3>
+      <p className="mt-1 text-xs leading-5 text-ink-muted">{detail}</p>
+    </div>
   )
+}
+
+function checkView(item: PrecheckItem) {
+  return {
+    name: item.name,
+    state: item.ok ? 'ok' as const : 'fail' as const,
+    current: item.current,
+    fix: item.fix,
+  }
 }

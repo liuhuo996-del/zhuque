@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import com.zhuque.common.ApiException;
 import com.zhuque.common.CanonicalJson;
 import com.zhuque.m4_closure.ClosureChecker;
 import com.zhuque.m4_closure.ClosureChecker.ClosureInput;
@@ -66,6 +67,28 @@ public class ManifestCompiler {
         var department = repository.requireDepartment(agent.departmentId());
         var intents = repository.intentsForAgent(agentId);
         var packs = repository.packsForAgent(agentId);
+        List<ToolRow> trashedTools = repository.trashedToolsForAgent(agentId);
+        if (!trashedTools.isEmpty()) {
+            String toolNames = trashedTools.stream().map(ToolRow::name).limit(8)
+                    .collect(java.util.stream.Collectors.joining("、"));
+            if (trashedTools.size() > 8) {
+                toolNames += " 等 " + trashedTools.size() + " 个工具";
+            }
+            throw ApiException.conflict("能力包仍引用已归档 REST API 的工具：" + toolNames,
+                    "在工具池回收站恢复来源，或从能力包显式移除/替换这些工具后再新建 Release；"
+                            + "已冻结的历史 Release 不会被改写");
+        }
+        List<ToolRow> deprecatedTools = repository.deprecatedToolsForAgent(agentId);
+        if (!deprecatedTools.isEmpty()) {
+            String toolNames = deprecatedTools.stream().map(ToolRow::name).limit(8)
+                    .collect(java.util.stream.Collectors.joining("、"));
+            if (deprecatedTools.size() > 8) {
+                toolNames += " 等 " + deprecatedTools.size() + " 个工具";
+            }
+            throw ApiException.conflict("能力包仍引用已弃用的 REST endpoint 工具：" + toolNames,
+                    "这些 endpoint 已从最新 OpenAPI 移除。请在能力包中显式移除/替换后再新建 Release；"
+                            + "已冻结的历史 Release 不会被改写");
+        }
         List<ToolRow> tools = repository.toolsForAgent(agentId);
 
         List<ToolNode> nodes = tools.stream().map(tool -> new ToolNode(tool.id(), tool.name(),

@@ -1,12 +1,15 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { fetchAgents, fetchDepartments } from '@/mock/api'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { fetchAgents, fetchDepartments, trashAgent, type ApiError } from '@/lib/api'
 import { useDepartment } from '@/state/department'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { SkeletonTable } from '@/components/ui/SkeletonTable'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
+import { Drawer } from '@/components/ui/Drawer'
+import { ErrorState } from '@/components/ui/ErrorState'
 import { useToast } from '@/components/ui/Toast'
 import { copyText, formatDate } from '@/lib/utils'
 import type { Agent, Health } from '@/types'
@@ -31,11 +34,30 @@ function HealthDot({ health }: { health: Health }) {
 export function AgentsList() {
   const { deptId } = useDepartment()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const toast = useToast()
+  const [retiring, setRetiring] = useState<Agent | null>(null)
+  const [reason, setReason] = useState('')
   const agents = useQuery({ queryKey: ['agents', deptId], queryFn: () => fetchAgents(deptId) })
   const departments = useQuery({ queryKey: ['departments'], queryFn: fetchDepartments })
+  const retire = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => trashAgent(id, reason),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['agents'] })
+      await queryClient.invalidateQueries({ queryKey: ['audit-events'] })
+      setRetiring(null)
+      setReason('')
+      toast('数字员工已退役并移入回收站')
+    },
+  })
 
   const deptName = (id: string) => departments.data?.find((d) => d.id === id)?.name ?? id
+  const departmentsReady = departments.data !== undefined
+  const hasDepartments = (departments.data ?? []).length > 0
+  const beginCreate = () => {
+    if (!departmentsReady) return
+    navigate(hasDepartments ? '/agents/new' : '/departments?create=1')
+  }
 
   const columns: Column<Agent>[] = [
     {
@@ -58,13 +80,14 @@ export function AgentsList() {
       render: (a) => (
         <span className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           <Button size="sm" variant="ghost" onClick={() => navigate(`/agents/${a.id}`)}>查看</Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/agents/${a.id}?tab=releases`)}>新建 Release</Button>
+          <Button size="sm" variant="ghost" onClick={() => navigate(`/agents/${a.id}?tab=releases`)}>Release 历史</Button>
           <Button
             size="sm" variant="ghost"
             onClick={async () => { await copyText(a.mcpUrl); toast('已复制 MCP URL') }}
           >
             复制 MCP URL
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => setRetiring(a)}>退役</Button>
         </span>
       ),
     },
@@ -74,7 +97,13 @@ export function AgentsList() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">数字员工</h1>
-        <Button variant="primary" onClick={() => navigate('/agents/new')}>新建数字员工</Button>
+        <Button
+          variant="primary"
+          disabled={!departmentsReady}
+          onClick={beginCreate}
+        >
+          {!departmentsReady ? '读取数字部门…' : hasDepartments ? '新建数字员工' : '先创建数字部门'}
+        </Button>
       </div>
       {agents.isLoading ? (
         <SkeletonTable rows={5} cols={7} />
@@ -87,11 +116,34 @@ export function AgentsList() {
           empty={
             <EmptyState
               message="还没有数字员工。创建第一个，朱雀会从工具池里帮你挑出它需要的工具。"
-              action={<Button variant="primary" onClick={() => navigate('/agents/new')}>创建数字员工</Button>}
+              action={<Button variant="primary" disabled={!departmentsReady} onClick={beginCreate}>
+                {!departmentsReady ? '读取数字部门…' : hasDepartments ? '创建数字员工' : '先创建数字部门'}
+              </Button>}
             />
           }
         />
       )}
+
+      <Drawer open={!!retiring} onClose={() => setRetiring(null)} title="退役数字员工">
+        {retiring && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm leading-6">
+              「{retiring.name}」将停止使用并进入回收站。已发布能力会先安全摘除，Release、审批、测试、门禁和部署证据不会删除。
+            </p>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-ink-muted">退役理由</span>
+              <textarea className="input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="填写可审计的业务理由" />
+            </label>
+            {retire.error && <ErrorState compact what={(retire.error as ApiError).what} fix={(retire.error as ApiError).fix} />}
+            <div className="flex gap-2">
+              <Button variant="danger" disabled={reason.trim().length < 2 || retire.isPending} onClick={() => retire.mutate({ id: retiring.id, reason: reason.trim() })}>
+                {retire.isPending ? '处理中…' : '确认退役'}
+              </Button>
+              <Button variant="ghost" onClick={() => setRetiring(null)}>取消</Button>
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }

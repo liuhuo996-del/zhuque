@@ -12,6 +12,7 @@ import com.zhuque.persistence.ControlPlaneRepository;
  * M7 · v1 内置规则集（每条一个 GateRule 实现类，这里列清单和判定语义）：
  *
  * BLOCK 级：
+ *   l1-contract       正式上游契约测试存在失败 case
  *   idempotency        effect=write 且 idempotency_verified=false（数据来自 L1 幂等实测）
  *   l0-completeness    L0 schema 完备性低于阈值（阈值 = 通过的 L0 case 占比，默认 0.9）
  *   closure            闭包检查结论 = BLOCKED
@@ -35,6 +36,22 @@ public final class BuiltinRules {
         EvidenceRule(ControlPlaneRepository repository) { this.repository = repository; }
         protected List<Map<String, Object>> tools(UUID releaseId) {
             return maps(repository.requireRelease(releaseId).manifest().get("tools"));
+        }
+    }
+
+    @Component
+    public static final class L1ContractRule extends EvidenceRule {
+        public L1ContractRule(ControlPlaneRepository repository) { super(repository); }
+        public String id() { return "l1-contract"; }
+        public String severity() { return "BLOCK"; }
+        public Verdict evaluate(UUID releaseId, Map<String, Object> config) {
+            var reports = repository.testReports(releaseId, "L1");
+            List<String> failed = reports.stream().filter(report -> "fail".equals(report.result()))
+                    .map(ControlPlaneRepository.TestReportRow::caseId).toList();
+            boolean pass = !reports.isEmpty() && failed.isEmpty();
+            return new Verdict(pass, pass ? "正式上游 L1 契约测试全部通过"
+                    : reports.isEmpty() ? "尚未运行正式上游 L1 契约测试"
+                    : "L1 失败 case：" + failed + "。修复真实接口或参数模板后重跑");
         }
     }
 

@@ -61,6 +61,7 @@ public class DualTargetPublisher {
      */
     public PublishResult publish(UUID releaseId, String operator) {
         ReleaseRow release = repository.requireRelease(releaseId);
+        assertAgentCanPublish(release);
         if (!"approved".equals(release.status())) {
             throw ApiException.conflict("Release 尚未 approved，不能发布", "完成测试、门禁和人工审批后再发布");
         }
@@ -83,6 +84,7 @@ public class DualTargetPublisher {
      */
     public void replay(UUID oldReleaseId, String operator) {
         ReleaseRow release = repository.requireRelease(oldReleaseId);
+        assertAgentCanPublish(release);
         if (release.nacosPayload().isEmpty() || release.higressAuthPayload().isEmpty()) {
             throw ApiException.conflict("旧 Release 不含完整双目标快照", "只能选择曾成功冻结并发布的版本回滚");
         }
@@ -99,6 +101,18 @@ public class DualTargetPublisher {
             String fix = failures.stream().map(DeployPrecheck.CheckItem::fix).distinct()
                     .collect(java.util.stream.Collectors.joining("；"));
             throw ApiException.unavailable("发布前置检查失败：" + what, fix);
+        }
+    }
+
+    private void assertAgentCanPublish(ReleaseRow release) {
+        var agent = repository.requireAgent(release.agentId());
+        repository.assertReleaseCreatedAfterLastAgentRestore(release.id());
+        if ("retired".equals(agent.status())) {
+            throw ApiException.conflict("已退役数字员工不能发布或回滚历史 Release",
+                    "先在回收站恢复为草稿，并新建 Release 重新完成测试、门禁和人工审批");
+        }
+        if ("suspended".equals(agent.status())) {
+            throw ApiException.conflict("已暂停数字员工不能发布或回滚", "先恢复数字员工并签发新密钥，再由人工继续发布");
         }
     }
 

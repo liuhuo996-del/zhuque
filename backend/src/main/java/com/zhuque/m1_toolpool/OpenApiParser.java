@@ -1,5 +1,6 @@
 package com.zhuque.m1_toolpool;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -20,6 +21,7 @@ import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
@@ -49,11 +51,13 @@ public class OpenApiParser {
             String operationId,      // 可能为空，为空时草稿生成用 method+path 造名
             String method,
             String path,
+            String serverUrl,       // 已按 operation/path/root 优先级解析，并展开变量
             String summary,
             Map<String, Object> parameters,     // 已合并 path 级参数，含 in/required/schema
             Map<String, Object> requestBodySchema,
             Map<String, Object> responseSchema, // 主成功响应（2xx）的 schema
-            Map<String, Object> examples) {
+            Map<String, Object> examples,
+            Map<String, Object> l1ControlledFixture) {
     }
 
     /** 单个 endpoint 的解析失败记录（逐条报错，不整体失败） */
@@ -69,6 +73,11 @@ public class OpenApiParser {
      * allOf 合并与 oneOf 并集要自己遍历 schema 树完成。
      */
     public ParseResult parse(String specText) {
+        return parse(specText, null);
+    }
+
+    /** fallbackServerUrl 用于 OpenAPI 未声明 servers 时补全 REST 请求的绝对地址。 */
+    public ParseResult parse(String specText, String fallbackServerUrl) {
         if (specText == null || specText.isBlank()) {
             throw new IllegalArgumentException("OpenAPI 文档为空");
         }
@@ -102,7 +111,7 @@ public class OpenApiParser {
             item.readOperationsMap().forEach((method, operation) -> {
                 String methodName = method.name().toLowerCase();
                 try {
-                    endpoints.add(parseEndpoint(path, methodName, item, operation));
+                    endpoints.add(parseEndpoint(path, methodName, item, operation, api, fallbackServerUrl));
                 } catch (RuntimeException error) {
                     errors.add(new ParseError(path, methodName, "operation", safeMessage(error)));
                 }
@@ -111,7 +120,8 @@ public class OpenApiParser {
         return new ParseResult(List.copyOf(endpoints), List.copyOf(errors));
     }
 
-    private ParsedEndpoint parseEndpoint(String path, String method, PathItem item, Operation operation) {
+    private ParsedEndpoint parseEndpoint(String path, String method, PathItem item, Operation operation,
+                                         OpenAPI api, String fallbackServerUrl) {
         if (operation == null) {
             throw new IllegalArgumentException("operation 为空");
         }
@@ -123,8 +133,78 @@ public class OpenApiParser {
         Map<String, Object> responseSchema = schemaFromResponse(operation.getResponses());
         Map<String, Object> examples = collectExamples(operation.getRequestBody(), operation.getResponses());
         String summary = firstNonBlank(operation.getSummary(), operation.getDescription(), "");
-        return new ParsedEndpoint(operation.getOperationId(), method, path, summary,
-                parameters, requestSchema, responseSchema, examples);
+        String serverUrl = resolveServerUrl(operation, item, api, fallbackServerUrl);
+        return new ParsedEndpoint(operation.getOperationId(), method, path, serverUrl, summary,
+                parameters, requestSchema, responseSchema, examples, l1ControlledFixture(operation));
+    }
+
+    /**
+     * L1 的自动出网必须是 endpoint 级的显式选择。OpenAPI 的 vendor extension 可能携带
+     * 任意 JSON，不能把它原样冻结到请求模板；只提取这两个经过校验的最小字段。
+     */
+    private static Map<String, Object> l1ControlledFixture(Operation operation) {
+        if (operation.getExtensions() == null) {
+            return Map.of();
+        }
+        Object extension = operation.getExtensions().get("x-zhuque-l1");
+        if (!(extension instanceof Map<?, ?> raw)
+                || !Boolean.TRUE.equals(raw.get("testSafe"))
+                || !(raw.get("fixture") instanceof String fixture)
+                || fixture.isBlank()) {
+            return Map.of();
+        }
+        return Map.of("testSafe", true, "fixture", fixture.trim());
+    }
+
+    private static String resolveServerUrl(Operation operation, PathItem item, OpenAPI api,
+                                           String fallbackServerUrl) {
+        List<Server> servers = operation.getServers();
+        if (servers == null || servers.isEmpty()) {
+            servers = item.getServers();
+        }
+        if ((servers == null || servers.isEmpty()) && api.getServers() != null) {
+            servers = api.getServers();
+        }
+        String value = servers == null || servers.isEmpty() ? null : expandServer(servers.get(0));
+        if (value == null || value.isBlank() || "/".equals(value)) {
+            return trimTrailingSlash(fallbackServerUrl);
+        }
+        try {
+            URI server = URI.create(value);
+            if (server.isAbsolute()) {
+                return trimTrailingSlash(server.toString());
+            }
+            if (fallbackServerUrl != null && !fallbackServerUrl.isBlank()) {
+                String base = fallbackServerUrl.endsWith("/") ? fallbackServerUrl : fallbackServerUrl + "/";
+                return trimTrailingSlash(URI.create(base).resolve(value).toString());
+            }
+        } catch (IllegalArgumentException ignored) {
+            // 下方保留原值，L0 会把非绝对 URL 明确判为失败，而不是导入阶段静默改写。
+        }
+        return trimTrailingSlash(value);
+    }
+
+    private static String expandServer(Server server) {
+        if (server == null || server.getUrl() == null) {
+            return null;
+        }
+        String result = server.getUrl();
+        if (server.getVariables() != null) {
+            for (var entry : server.getVariables().entrySet()) {
+                String replacement = entry.getValue() == null ? null : entry.getValue().getDefault();
+                if (replacement != null) {
+                    result = result.replace("{" + entry.getKey() + "}", replacement);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static String trimTrailingSlash(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replaceAll("/+$", "");
     }
 
     private void mergeParameters(Map<String, Object> target, List<Parameter> parameters) {

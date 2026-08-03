@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * 可折叠 JSON 查看器（等宽）。diffWith 打开后：与上一版逐行对比，
- * 仅出现在当前版的行高亮（简化 diff，mock 用足够）。
+ * 仅出现在当前版的行高亮（v1 的轻量级配置对比）。
  */
 export function JsonBlock({ title, data, diffWith, defaultOpen = true }: {
   title: string

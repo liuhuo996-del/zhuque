@@ -1,9 +1,10 @@
 // 意图 × 工具矩阵的纯计算引擎：覆盖、闭包、预算、风险。
 // 任何增删后由 React 状态驱动全部重算，不需要手动刷新。
-import { USER_SUPPLIED } from '@/mock/data'
 import type { HitMap, Intent, Tool } from '@/types'
 
 export const BUDGET = { maxTools: 20, maxTokens: 15000 }
+// 对话或调用上下文直接提供的字段不需要由工具再次产出。
+const USER_SUPPLIED_FIELDS = new Set(['phone', 'amount', 'reason', 'title', 'body', 'keyword', 'address', 'date_range'])
 
 export interface MissingParam {
   param: string
@@ -23,7 +24,7 @@ export function isIntentCovered(intent: Intent, selected: Set<string>, hits: Hit
 
 export function computeClosure(selectedIds: Set<string>, pool: Tool[]): ClosureResult {
   const selected = pool.filter((t) => selectedIds.has(t.id))
-  const produced = new Set<string>(USER_SUPPLIED)
+  const produced = new Set<string>(USER_SUPPLIED_FIELDS)
   for (const t of selected) for (const p of t.produces) produced.add(p)
 
   const missingMap = new Map<string, Set<string>>()
