@@ -33,24 +33,21 @@ export function Settings() {
     if (precheck.data) return precheck.data.map(checkView)
     return [
       { name: 'Nacos Admin API', state: precheck.isFetching ? 'running' : 'pending', current: '' },
-      { name: 'Higress Console', state: precheck.isFetching ? 'running' : 'pending', current: '' },
-      { name: 'Redis', state: precheck.isFetching ? 'running' : 'pending', current: '' },
-      { name: 'MCP Server 能力', state: precheck.isFetching ? 'running' : 'pending', current: '' },
     ]
   }, [precheck.data, precheck.isFetching])
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
-      <div>
-        <h1 className="text-lg font-semibold">部署与门禁</h1>
-        <p className="mt-1 text-xs leading-5 text-ink-muted">连接凭据由部署环境安全注入，控制台只执行真实探测并展示结果，不会保存或伪造连接状态。</p>
+    <div className="page-shell max-w-5xl">
+      <div className="border-b border-line pb-5">
+        <h1 className="page-title">部署与门禁</h1>
+        <p className="page-description">连接凭据由部署环境安全注入，控制台只执行真实探测并展示结果。</p>
       </div>
 
       <section className="rounded border border-line bg-surface p-4">
         <h2 className="text-sm font-semibold">部署目标</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Target name="Nacos" detail="通过 Admin API 发布 MCP 服务定义与加密密钥引用。" />
-          <Target name="Higress" detail="负责 MCP 入口鉴权与运行时流量执行。" />
+          <Target name="Nacos" detail="GateForge 通过 AI MCP Admin API 发布和回滚完整 MCP 快照。" />
+          <Target name="Higress" detail="平台侧手工配置 Nacos3 source；自动发现路由，鉴权与流量策略独立维护。" />
         </div>
         <p className="mt-3 rounded border border-line bg-canvas p-3 text-xs leading-5 text-ink-muted">
           服务地址、命名空间和凭据必须通过后端部署配置设置。为防止未保存的表单值被误认为已生效，这些参数不在控制台中提供本地编辑。
@@ -78,7 +75,7 @@ export function Settings() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">正式环境前置检查</h2>
-            <p className="mt-1 text-xs text-ink-muted">实时探测 Nacos、Higress、Redis 与 MCP Server 能力；任一失败都会阻止发布。</p>
+            <p className="mt-1 text-xs text-ink-muted">只探测 Nacos AI MCP Admin API；Higress 运行面不阻塞 GateForge 发布。</p>
           </div>
           <Button size="sm" variant="primary" disabled={precheck.isFetching} onClick={() => precheck.refetch()}>
             {precheck.isFetching ? '检查中…' : precheck.data ? '重新检查' : '执行检查'}

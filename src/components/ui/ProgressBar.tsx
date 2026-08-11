@@ -15,7 +15,7 @@ export function ProgressBar({ percent, stepName, warn }: {
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line">
         <div
-          className={cn('h-full rounded-full', warn ? 'bg-warn' : 'bg-ink')}
+          className={cn('h-full rounded-full transition-[width] duration-300', warn ? 'bg-warn' : 'bg-brand')}
           style={{ width: `${p}%` }}
         />
       </div>
@@ -41,7 +41,7 @@ export function BudgetBar({ label, used, max, unit }: {
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line">
-        <div className={cn('h-full rounded-full', over ? 'bg-warn' : 'bg-ink/70')} style={{ width: `${p}%` }} />
+        <div className={cn('h-full rounded-full', over ? 'bg-warn' : 'bg-brand')} style={{ width: `${p}%` }} />
       </div>
     </div>
   )

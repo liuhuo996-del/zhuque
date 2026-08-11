@@ -89,7 +89,7 @@ public class ReleaseService {
     }
 
     /**
-     * 功能：回滚。取目标旧 Release 的两份 payload 原样重放（委托 M8），零重新计算。
+     * 功能：回滚。取目标旧 Release 的 Nacos payload 原样重放（委托 M8），零重新计算。
      * 成功后：旧版本重新置 released，被回滚的置 rolled_back。
      * 任何记录都不删除。
      */

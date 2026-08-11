@@ -70,11 +70,11 @@ export function ReleaseDetail() {
   const steps = buildSteps(r)
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="page-shell">
       {/* 顶部：状态机 + 标识 */}
-      <div className="rounded border border-line bg-surface p-4">
+      <div className="panel p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-lg font-semibold">{agent?.name ?? r.agentId}</h1>
+          <h1 className="page-title">{agent?.name ?? r.agentId}</h1>
           <code className="font-mono text-sm font-medium">{r.version}</code>
           <button
             className="group flex items-center gap-1 font-mono text-xs text-ink-muted hover:text-ink"
@@ -118,13 +118,13 @@ export function ReleaseDetail() {
               <p>
                 即将发布 <code className="font-mono text-xs">{r.version}</code>（manifest_hash{' '}
                 <code className="font-mono text-xs">{shortHash(r.manifestHash)}</code>）。
-                双 target 事务：写入 Nacos + 配置 Higress 鉴权，任一失败整体回滚。
+                GateForge 将全量 MCP 快照写入 Nacos；Higress 由已配置的 Nacos3 source 自动发现。
               </p>
             )}
             {confirmAction === 'rollback' && (
               <p>
                 回滚 = 将 <code className="font-mono text-xs">{r.version}</code> 的全量快照原样重放到
-                Nacos 与 Higress，替换当前线上版本 <code className="font-mono text-xs">{currentlyReleased?.version}</code>。
+                Nacos MCP Registry，替换当前线上版本 <code className="font-mono text-xs">{currentlyReleased?.version}</code>。
               </p>
             )}
             <div className="mt-3 flex gap-2">
@@ -142,7 +142,7 @@ export function ReleaseDetail() {
         {publishedKey && (
           <section className="mt-3 rounded border border-warn/40 bg-[var(--warn-tint)] p-3">
             <p className="text-xs font-medium">初始访问密钥（仅本次显示）</p>
-            <p className="mt-1 text-xs text-ink-muted">将它交给调用方安全保存；朱雀不会再次返回该明文。</p>
+            <p className="mt-1 text-xs text-ink-muted">将它交给调用方安全保存；GateForge 不会再次返回该明文。</p>
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 break-all font-mono text-xs select-all">{publishedKey.key}</code>
               <Button size="sm" onClick={async () => { await copyText(publishedKey.key); toast('已复制初始访问密钥') }}>复制</Button>
@@ -154,12 +154,15 @@ export function ReleaseDetail() {
       </div>
 
       {/* 主体：配置(左) × 证据(右) 并置。这个并置是产品主张，不许折叠进二级页。 */}
-      <div className="grid grid-cols-2 items-start gap-4">
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
         {/* 左栏 · 配置产物 */}
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold">配置产物 <span className="ml-1 text-xs font-normal text-ink-muted">参与部署</span></h2>
           <JsonBlock title="nacos_payload" data={r.nacosPayload} diffWith={prev?.nacosPayload} />
-          <JsonBlock title="higress_auth_payload" data={r.higressAuthPayload} diffWith={prev?.higressAuthPayload} defaultOpen={false} />
+          {hasLegacyPayload(r.higressAuthPayload) && (
+            <JsonBlock title="higress_auth_payload（历史兼容，不参与发布）" data={r.higressAuthPayload}
+              diffWith={prev?.higressAuthPayload} defaultOpen={false} />
+          )}
 
           <section className="rounded border border-line bg-surface p-4">
             <h3 className="text-xs font-semibold text-ink-muted">target_constraints</h3>
@@ -310,6 +313,10 @@ export function ReleaseDetail() {
       </div>
     </div>
   )
+}
+
+function hasLegacyPayload(value: unknown) {
+  return !!value && typeof value === 'object' && Object.keys(value as Record<string, unknown>).length > 0
 }
 
 function LayerSummary({ cases }: { cases: TestCase[] }) {

@@ -1,20 +1,20 @@
-# 朱雀 v1
+# GateForge v1
 
-你在开发「朱雀」v1。以下是必须遵守的上下文，任何实现都不得违背。
+你在开发「GateForge」v1（历史代码包名保留 `zhuque`）。以下是必须遵守的上下文，任何实现都不得违背。
 
 ## 产品是什么
 
-朱雀是企业数字员工的能力发布控制面。它把企业的 REST API 池，编译成经过
+GateForge 是企业数字员工的能力发布控制面。它把企业的 REST API 池，编译成经过
 测试、审批、版本化、可回滚的「数字员工能力」，以声明式方式发布到 Nacos，
 由 Higress 网关执行。
 
-一句话：朱雀不回答"怎么把 API 变成 MCP"，它回答"凭什么让这个数字员工
+一句话：GateForge 不回答"怎么把 API 变成 MCP"，它回答"凭什么让这个数字员工
 带着这些工具上线"。
 
 ## 三方分工（关键，不要越界）
 
 ```
-朱雀   —— 纯控制面。不在任何调用链上，不收发 MCP 协议消息。
+GateForge—— 纯控制面。不在任何调用链上，不收发 MCP 协议消息。
           只生产静态 JSON 配置 + 证据记录。
 Nacos  —— 配置面。存 MCP service 定义（tools/描述/inputSchema/参数映射
           模板/后端引用），提供版本历史、灰度、回滚、密钥加密托管。
@@ -86,6 +86,7 @@ agent_pack(agent_id, pack_id)
 release(id, agent_id, version, status, manifest jsonb, manifest_hash,
         nacos_payload jsonb, higress_auth_payload jsonb,
         source_spec_hashes jsonb, target_constraints jsonb, created_at)
+  -- higress_auth_payload 仅保留历史兼容；新 Release 写空对象，不参与发布
   status: draft | candidate | tested | approved | released
           | superseded | rolled_back
 
@@ -101,6 +102,7 @@ approval(id, release_id, manifest_hash, approver, decided_at, decision)
 
 deploy_record(id, release_id, target, payload_hash, applied_at, result)
   target: nacos | higress_auth
+  -- 新发布只写 nacos；higress_auth 仅用于读取历史记录
 
 drift_event(id, scope_type, scope_id, kind, detail jsonb,
             detected_at, status)
@@ -117,9 +119,9 @@ agent_key(id, agent_id, key_ref, rotated_at, revoked_at)
 2. Release 冻结后 manifest 不可改；要改就开新 Release。
 3. 审批绑定 manifest_hash：内容一变，已有审批自动失效。
 4. Release 存全量快照，不存 diff。回滚 = 旧快照原样重放。
-5. 发布是双 target 事务（Nacos + Higress 鉴权），任一失败整体回滚。
-   绝不允许出现「工具已暴露、鉴权未配」的裸奔状态。
+5. GateForge 发布只写 Nacos 3 原生 MCP Registry；失败恢复 Nacos 快照。
+   Higress 的 Nacos3 source、路由和鉴权由运行平台手工独立维护，不能阻塞 Release。
 6. 命名规则 mcp-{department_slug}-{agent_slug} 生成后落库，
    后续 reconcile / 回滚全靠它对账，生成后不可变更。
-7. 一切网关特有的代码只能出现在 HigressAuthTarget 一个类里，
-   不得渗入业务逻辑。
+7. 发布、回滚、漂移和生命周期不得调用 Higress Console 写接口；运行时网关
+   通过 Nacos 自动发现，GateForge 不进入 Agent 调用链。

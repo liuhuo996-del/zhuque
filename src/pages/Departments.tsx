@@ -58,11 +58,11 @@ export function Departments() {
   const error = mutation.error as ApiError | null
 
   return (
-    <div className="flex max-w-5xl flex-col gap-5">
-      <div className="flex items-start justify-between gap-4">
+    <div className="page-shell">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
         <div>
-          <h1 className="text-lg font-semibold">数字部门</h1>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-muted">
+          <h1 className="page-title">数字部门</h1>
+          <p className="page-description max-w-2xl">
             数字部门是企业能力门户的组织入口。每个部门固化一个 consumer group 引用，部门下的数字员工、能力包和发布记录都可独立追查。
           </p>
         </div>
@@ -89,7 +89,7 @@ export function Departments() {
                   setDeptId(department.id)
                   navigate('/agents')
                 }}
-                className="group rounded border border-line bg-surface p-4 text-left hover:border-ink/40 hover:bg-canvas"
+                className="panel group p-4 text-left transition hover:-translate-y-0.5 hover:border-brand hover:shadow-md"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>

@@ -55,17 +55,17 @@ export function AgentNew() {
   const error = mutation.error as ApiError | null
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
-      <div className="flex items-start justify-between">
+    <div className="page-shell max-w-4xl">
+      <div className="flex items-start justify-between border-b border-line pb-5">
         <div>
-          <h1 className="text-lg font-semibold">新建数字员工</h1>
-          <p className="mt-1 text-xs text-ink-muted">先登记稳定身份。创建后再从工具池选择能力、生成 Release、测试并由人工发布。</p>
+          <h1 className="page-title">新建数字员工</h1>
+          <p className="page-description">先登记稳定身份，再从工具池组装能力、生成 Release 并完成发布。</p>
         </div>
         <Button variant="ghost" onClick={() => navigate('/agents')}>取消</Button>
       </div>
 
-      <div className="flex flex-col gap-4 rounded border border-line bg-surface p-5">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="panel flex flex-col gap-4 p-5 md:p-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="名称">
             <input value={name} onChange={(event) => setName(event.target.value)} className="input" placeholder="例：售后客服专员" />
           </Field>

@@ -14,11 +14,16 @@ export class ApiError extends Error {
   }
 }
 
-const OPERATOR_KEY = 'zhuque.operator'
+const OPERATOR_KEY = 'gateforge.operator'
+const LEGACY_OPERATOR_KEY = 'zhuque.operator'
 
 export function currentOperator() {
   if (typeof window === 'undefined') return 'console-user'
-  return window.localStorage.getItem(OPERATOR_KEY)?.trim() || 'console-user'
+  const current = window.localStorage.getItem(OPERATOR_KEY)?.trim()
+  if (current) return current
+  const legacy = window.localStorage.getItem(LEGACY_OPERATOR_KEY)?.trim()
+  if (legacy) window.localStorage.setItem(OPERATOR_KEY, legacy)
+  return legacy || 'console-user'
 }
 
 export function setCurrentOperator(value: string) {
@@ -35,7 +40,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(path, { ...init, headers })
   } catch (error) {
-    throw new ApiError('无法连接朱雀后端', error instanceof Error ? error.message : '检查后端服务与网络', 0)
+    throw new ApiError('无法连接 GateForge 后端', error instanceof Error ? error.message : '检查后端服务与网络', 0)
   }
   const text = await response.text()
   let body: unknown = null

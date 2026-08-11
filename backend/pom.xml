@@ -14,8 +14,8 @@
   <groupId>com.zhuque</groupId>
   <artifactId>zhuque-backend</artifactId>
   <version>0.1.0-SNAPSHOT</version>
-  <name>zhuque-backend</name>
-  <description>朱雀 · 数字员工能力发布控制面（纯控制面：只生产静态配置 + 证据，不在调用链上）</description>
+  <name>gateforge-backend</name>
+  <description>GateForge · 数字员工能力发布控制面（纯控制面：只生产静态配置 + 证据，不在调用链上）</description>
 
   <properties>
     <java.version>17</java.version>

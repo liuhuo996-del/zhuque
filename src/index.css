@@ -2,28 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- P1.0 设计 token（CSS 变量） ----
-   论点：界面上出现颜色 = 系统做出了一个判断。其余全部灰阶。 */
+/* GateForge console tokens. The neutral surfaces and blue interaction language
+   intentionally sit next to Higress / HiMarket without copying their brand. */
 :root {
-  --canvas: #f6f7f9;
+  --canvas: #f7f7f7;
   --surface: #ffffff;
-  --border: #e3e6eb;
-  --ink: #12151a;
-  --ink-muted: #5b6472;
-  --ink-faint: #8b94a3;
+  --surface-subtle: #fcfcfe;
+  --border: #e5e5e5;
+  --border-strong: #d9d9d9;
+  --ink: #18181b;
+  --ink-muted: #52525b;
+  --ink-faint: #737373;
 
-  /* 语义色：只用于判定结果，不得他用 */
-  --pass: #1f7a4d;
-  --block: #c0342b;
-  --warn: #b26a00;
-  --effect-read: #2c5fa8;
-  --effect-write: #b26a00; /* 与 warn 同色，语义一致，刻意为之 */
-  --effect-delete: #c0342b;
+  --brand: #6366f1;
+  --brand-strong: #4f46e5;
+  --brand-hover: #818cf8;
+  --brand-tint: #eef2ff;
+  --brand-soft: rgba(99, 102, 241, 0.14);
 
-  /* 语义色的浅底（列背景 / 行背景用） */
-  --pass-tint: rgba(31, 122, 77, 0.07);
-  --block-tint: rgba(192, 52, 43, 0.06);
-  --warn-tint: rgba(178, 106, 0, 0.07);
+  --pass: #23b066;
+  --block: #e84738;
+  --warn: #f98e1a;
+  --effect-read: #256ac5;
+  --effect-write: #d97706;
+  --effect-delete: #e84738;
+
+  --pass-tint: rgba(21, 134, 91, 0.08);
+  --block-tint: rgba(209, 60, 60, 0.07);
+  --warn-tint: rgba(196, 122, 18, 0.08);
+
+  --shadow-panel: 0 1px 2px rgba(20, 31, 51, 0.03), 0 5px 18px rgba(20, 31, 51, 0.035);
 }
 
 html {
@@ -36,6 +44,15 @@ html {
 
 body {
   margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root { min-height: 100vh; }
+
+::selection {
+  color: var(--ink);
+  background: var(--brand-soft);
 }
 
 code,
@@ -45,8 +62,8 @@ pre,
 }
 
 *:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
@@ -54,7 +71,7 @@ pre,
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--border-strong);
   border-radius: 5px;
   border: 2px solid var(--canvas);
 }
@@ -64,10 +81,42 @@ pre,
 
 /* 表单控件的统一样式 */
 .input {
-  @apply h-8 rounded border border-line bg-surface px-2.5 text-sm text-ink placeholder:text-ink-faint;
+  @apply h-9 rounded-md border border-line bg-surface px-3 text-sm text-ink shadow-sm placeholder:text-ink-faint;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+.input:hover {
+  border-color: var(--border-strong);
+}
+.input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+  outline: none;
 }
 textarea.input {
   @apply h-auto py-2;
+}
+
+select.input {
+  appearance: auto;
+}
+
+.panel {
+  @apply rounded-lg border border-line bg-surface;
+  box-shadow: var(--shadow-panel);
+}
+
+.page-shell {
+  @apply mx-auto flex w-full max-w-[1600px] flex-col gap-5;
+}
+
+.page-title {
+  @apply text-xl font-semibold tracking-[-0.02em] text-ink;
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.page-description {
+  @apply mt-1 text-sm leading-5 text-ink-muted;
 }
 
 /* 骨架屏：保持行高，避免跳动 */
@@ -76,8 +125,9 @@ textarea.input {
   50% { opacity: 0.45; }
 }
 .skeleton {
-  background: var(--border);
-  border-radius: 4px;
+  background: linear-gradient(90deg, var(--border) 25%, #f1f3f7 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  border-radius: 6px;
   animation: skeleton-pulse 1.4s ease-in-out infinite;
 }
 
@@ -90,7 +140,6 @@ textarea.input {
   animation: col-flash 0.9s ease-in-out 2;
 }
 
-/* 动效纪律：仅骨架屏 / StepBar 推进 / 矩阵格 hover 三处。 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

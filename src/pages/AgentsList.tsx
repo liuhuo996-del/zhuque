@@ -94,9 +94,12 @@ export function AgentsList() {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">数字员工</h1>
+    <div className="page-shell">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
+        <div>
+          <h1 className="page-title">数字员工</h1>
+          <p className="page-description">管理每个数字员工的职责、工具能力和发布状态。</p>
+        </div>
         <Button
           variant="primary"
           disabled={!departmentsReady}
@@ -115,7 +118,7 @@ export function AgentsList() {
           onRowClick={(a) => navigate(`/agents/${a.id}`)}
           empty={
             <EmptyState
-              message="还没有数字员工。创建第一个，朱雀会从工具池里帮你挑出它需要的工具。"
+              message="还没有数字员工。创建第一个，GateForge 会从工具池中组装它需要的受治理能力。"
               action={<Button variant="primary" disabled={!departmentsReady} onClick={beginCreate}>
                 {!departmentsReady ? '读取数字部门…' : hasDepartments ? '创建数字员工' : '先创建数字部门'}
               </Button>}

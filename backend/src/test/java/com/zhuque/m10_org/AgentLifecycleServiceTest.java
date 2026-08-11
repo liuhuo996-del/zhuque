@@ -15,27 +15,24 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zhuque.common.ApiException;
-import com.zhuque.m8_deploy.HigressAuthTarget;
 import com.zhuque.m8_deploy.NacosTarget;
 import com.zhuque.persistence.ControlPlaneRepository;
 
-/**
- * 生命周期的关键回归：删除是退役而非硬删；线上摘除失败时的补偿顺序不能重新
- * 产生“工具已暴露但无鉴权”的窗口。测试使用记录型 fake，避免依赖真实网关或 Mockito agent。
- */
+/** 生命周期只管理 Nacos Registry；Higress 路由由独立 watcher 自动收敛。 */
 class AgentLifecycleServiceTest {
 
     @Test
-    void retiresAnActiveAgentOnlyAfterBothTargetsAreSafelyWithdrawn() {
+    void retiresAnActiveAgentOnlyAfterNacosMcpIsWithdrawn() {
         RecordingRepository repository = new RecordingRepository("active");
         RecordingNacos nacos = new RecordingNacos();
-        RecordingAuth auth = new RecordingAuth();
         RecordingKeys keys = new RecordingKeys();
 
-        new AgentLifecycleService(repository, keys, nacos, auth)
+        new AgentLifecycleService(repository, keys, nacos)
                 .retire(repository.agent.id(), "auditor@example.com", "功能下线");
 
-        assertEquals(List.of("nacos:withdraw", "auth:withdraw"), combined(nacos, auth));
+        assertEquals(List.of("nacos:withdraw"), nacos.events);
+        assertEquals("mcp-sales-orders", nacos.lastServiceName,
+                "必须从 /mcp/{name}/sse URL 解析服务名，不能误取 sse");
         assertTrue(keys.revoked);
         assertEquals("retired", repository.forcedStatus);
         assertEquals("agent", repository.trashedType);
@@ -45,38 +42,36 @@ class AgentLifecycleServiceTest {
     }
 
     @Test
-    void failedAuthWithdrawalRestoresAuthBeforeNacosAndDoesNotRetireLocally() {
+    void failedNacosWithdrawalRestoresSnapshotAndDoesNotRetireLocally() {
         RecordingRepository repository = new RecordingRepository("active");
         RecordingNacos nacos = new RecordingNacos();
-        RecordingAuth auth = new RecordingAuth();
         RecordingKeys keys = new RecordingKeys();
-        auth.failWithdrawal = true;
+        nacos.failWithdrawal = true;
 
-        ApiException error = assertThrows(ApiException.class, () -> new AgentLifecycleService(repository, keys, nacos, auth)
-                .retire(repository.agent.id(), "auditor@example.com", "功能下线"));
+        ApiException error = assertThrows(ApiException.class,
+                () -> new AgentLifecycleService(repository, keys, nacos)
+                        .retire(repository.agent.id(), "auditor@example.com", "功能下线"));
 
         assertTrue(error.what().contains("已恢复原快照"));
-        assertEquals(List.of("nacos:withdraw", "auth:withdraw", "auth:restore", "nacos:restore"),
-                combined(nacos, auth));
+        assertEquals(List.of("nacos:withdraw", "nacos:restore"), nacos.events);
         assertFalse(keys.revoked);
         assertEquals(null, repository.forcedStatus);
         assertEquals(null, repository.trashedType);
     }
 
     @Test
-    void localRetirementFailureRestoresTargetsInsteadOfLeavingActiveStateOffline() {
+    void localRetirementFailureRestoresNacosInsteadOfLeavingActiveStateOffline() {
         RecordingRepository repository = new RecordingRepository("active");
         repository.failAudit = true;
         RecordingNacos nacos = new RecordingNacos();
-        RecordingAuth auth = new RecordingAuth();
         RecordingKeys keys = new RecordingKeys();
 
-        ApiException error = assertThrows(ApiException.class, () -> new AgentLifecycleService(repository, keys, nacos, auth)
-                .retire(repository.agent.id(), "auditor@example.com", "功能下线"));
+        ApiException error = assertThrows(ApiException.class,
+                () -> new AgentLifecycleService(repository, keys, nacos)
+                        .retire(repository.agent.id(), "auditor@example.com", "功能下线"));
 
         assertTrue(error.what().contains("已恢复原线上配置"));
-        assertEquals(List.of("nacos:withdraw", "auth:withdraw", "auth:restore", "nacos:restore"),
-                combined(nacos, auth));
+        assertEquals(List.of("nacos:withdraw", "nacos:restore"), nacos.events);
         assertTrue(keys.revoked, "即使本地审计写失败，也应首先尝试吊销现有密钥");
     }
 
@@ -84,7 +79,7 @@ class AgentLifecycleServiceTest {
     void restoreRecordsGenerationBoundaryAndPurgeAuditsOnlyAfterDeletion() {
         RecordingRepository repository = new RecordingRepository("retired");
         RecordingKeys keys = new RecordingKeys();
-        new AgentLifecycleService(repository, keys, new RecordingNacos(), new RecordingAuth())
+        new AgentLifecycleService(repository, keys, new RecordingNacos())
                 .restoreFromTrash(repository.agent.id(), "auditor@example.com");
 
         assertEquals("draft", repository.forcedStatus);
@@ -93,20 +88,12 @@ class AgentLifecycleServiceTest {
         assertEquals("restore", repository.auditAction);
 
         repository = new RecordingRepository("retired");
-        AgentLifecycleService lifecycle = new AgentLifecycleService(repository, keys, new RecordingNacos(), new RecordingAuth());
+        AgentLifecycleService lifecycle = new AgentLifecycleService(repository, keys, new RecordingNacos());
         lifecycle.purge(repository.agent.id(), "auditor@example.com");
 
         assertTrue(repository.purged);
         assertEquals("purge", repository.auditAction);
         assertTrue(repository.auditAfterPurge);
-    }
-
-    private static List<String> combined(RecordingNacos nacos, RecordingAuth auth) {
-        List<String> events = new ArrayList<>();
-        events.addAll(nacos.events);
-        events.addAll(auth.events);
-        // The individual fake lists lose cross-target ordering. Reconstruct it from a shared sequence.
-        return nacos.sequence;
     }
 
     private static final class RecordingRepository extends ControlPlaneRepository {
@@ -126,7 +113,7 @@ class AgentLifecycleServiceTest {
             super(null, new ObjectMapper());
             UUID id = UUID.randomUUID();
             agent = new AgentRow(id, UUID.randomUUID(), "订单专员", "orders", "", "", status,
-                    "https://mcp.example.com/mcp-sales-orders", Instant.now());
+                    "https://mcp.example.com/mcp/mcp-sales-orders/sse", Instant.now());
         }
 
         @Override
@@ -193,48 +180,24 @@ class AgentLifecycleServiceTest {
     }
 
     private static final class RecordingNacos extends NacosTarget {
-        private static final List<String> sequence = new ArrayList<>();
         private final List<String> events = new ArrayList<>();
         private final Map<String, Object> before = Map.of("service", "before");
-
-        RecordingNacos() {
-            sequence.clear();
-        }
+        private boolean failWithdrawal;
+        private String lastServiceName;
 
         @Override
         public Map<String, Object> read(String serviceName) {
+            lastServiceName = serviceName;
             return before;
         }
 
         @Override
         public void restore(String serviceName, Map<String, Object> snapshot) {
+            lastServiceName = serviceName;
             String event = snapshot == null ? "nacos:withdraw" : "nacos:restore";
             events.add(event);
-            sequence.add(event);
-        }
-    }
-
-    private static final class RecordingAuth extends HigressAuthTarget {
-        private final List<String> events = new ArrayList<>();
-        private final Map<String, Object> before = Map.of("allowList", "before");
-        private boolean failWithdrawal;
-
-        RecordingAuth() {
-            super(new NacosTarget());
-        }
-
-        @Override
-        public Map<String, Object> read(String serviceName) {
-            return before;
-        }
-
-        @Override
-        public void restore(String serviceName, Map<String, Object> snapshot) {
-            String event = snapshot == null ? "auth:withdraw" : "auth:restore";
-            events.add(event);
-            RecordingNacos.sequence.add(event);
             if (snapshot == null && failWithdrawal) {
-                throw ApiException.unavailable("模拟 Higress 删除失败", "重试");
+                throw ApiException.unavailable("模拟 Nacos 删除失败", "重试");
             }
         }
     }

@@ -46,12 +46,13 @@ public class ConfigDriftDetector {
             if (release == null) {
                 continue;
             }
-            String name = String.valueOf(release.higressAuthPayload().get("mcpServerName"));
+            String name = String.valueOf(release.nacosPayload().get("mcpName"));
             try {
                 var actual = nacos.read(name);
                 Object expected = release.nacosPayload().get("service");
+                Object actualService = actual == null ? null : actual.getOrDefault("service", actual);
                 String expectedHash = CanonicalJson.sha256(expected);
-                String actualHash = CanonicalJson.sha256(actual);
+                String actualHash = CanonicalJson.sha256(actualService);
                 if (!expectedHash.equals(actualHash) && !repository.hasOpenDrift("agent", agent.id(), "config")) {
                     repository.insertDriftEvent("agent", agent.id(), "config", java.util.Map.of(
                             "releaseId", release.id().toString(), "expectedHash", expectedHash,
@@ -68,7 +69,7 @@ public class ConfigDriftDetector {
     }
 
     /**
-     * 功能：修复 = 重新 apply 当前 released Release（走 M8 双 target 事务重放）。
+     * 功能：修复 = 重新 apply 当前 released Release（走 M8 Nacos 快照重放）。
      * 成功后把对应 drift_event 置 resolved。
      */
     public void repairByReplay(UUID agentId, String operator) {

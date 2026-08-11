@@ -31,9 +31,11 @@ export function Packs() {
   ]
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4">
-      <h1 className="text-lg font-semibold">能力包</h1>
-      <p className="text-xs text-ink-muted">v1 中能力包由新建向导的匹配审核产生，这里只读。点击行查看包内工具。</p>
+    <div className="page-shell">
+      <div className="border-b border-line pb-5">
+        <h1 className="page-title">能力包</h1>
+        <p className="page-description">v1 中能力包由匹配审核生成。点击查看包内工具与使用它的数字员工。</p>
+      </div>
       {packs.isLoading ? (
         <SkeletonTable rows={3} cols={5} />
       ) : (

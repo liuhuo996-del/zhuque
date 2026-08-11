@@ -29,7 +29,7 @@ public class AgentService {
 
     private final ControlPlaneRepository repository;
 
-    @Value("${zhuque.mcp-public-base-url:http://localhost:8080}")
+    @Value("${zhuque.mcp-public-base-url:http://localhost:8080/mcp}")
     private String publicBaseUrl;
 
     public AgentService(ControlPlaneRepository repository) {

@@ -72,21 +72,21 @@ export function AgentDetail() {
   ]
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">{a.name}</h1>
+    <div className="page-shell">
+      <div className="flex flex-wrap items-center gap-3 border-b border-line pb-5">
+        <h1 className="page-title">{a.name}</h1>
         <code className="font-mono text-xs text-ink-faint">{a.slug}</code>
         <StatusBadge status={a.status} kind="agent" />
       </div>
 
-      <div className="flex gap-1 border-b border-line">
+      <div className="flex gap-1 overflow-x-auto border-b border-line">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setParams({ tab: t.key })}
             className={cn(
               'h-9 px-3 text-sm',
-              tab === t.key ? 'border-b-2 border-ink font-medium text-ink' : 'text-ink-muted hover:text-ink',
+              tab === t.key ? 'border-b-2 border-brand font-medium text-brand-strong' : 'text-ink-muted hover:text-brand-strong',
             )}
           >
             {t.label}
@@ -98,8 +98,8 @@ export function AgentDetail() {
         <div className="flex max-w-3xl flex-col gap-4">
           <section className="rounded border border-line bg-surface p-4">
             <h2 className="text-xs font-semibold text-ink-muted">MCP URL</h2>
-            <div className="mt-2 flex items-center gap-3">
-              <code className="select-all font-mono text-base">{a.mcpUrl}</code>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <code className="min-w-0 break-all font-mono text-sm select-all">{a.mcpUrl}</code>
               <Button size="sm" onClick={async () => { await copyText(a.mcpUrl); toast('已复制 MCP URL') }}>复制</Button>
             </div>
             <p className="mt-3 text-sm text-ink-muted">

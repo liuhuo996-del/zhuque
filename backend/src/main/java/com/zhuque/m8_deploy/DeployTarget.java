@@ -4,12 +4,12 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * M8 · 部署目标的统一接口。NacosTarget / HigressAuthTarget 都实现它，
- * DualTargetPublisher 只面向这个接口编排，不知道任何网关/配置中心细节。
+ * M8 · 外部目标的幂等快照接口。当前 Release 发布只编排 NacosTarget；
+ * Higress 由运行平台独立维护，不是 GateForge 的部署目标。
  */
 public interface DeployTarget {
 
-    /** nacos | higress_auth（deploy_record.target 的取值） */
+    /** 当前写入 nacos；higress_auth 仅可能出现在历史 deploy_record 中。 */
     String name();
 
     /**
@@ -20,7 +20,7 @@ public interface DeployTarget {
 
     /**
      * 功能：读取该 agent 在本 target 的当前线上状态（原样结构）。
-     * 双 target 事务的快照、M9 配置漂移的比对都用它。
+     * 发布补偿与 M9 配置漂移比对都用它。
      */
     Map<String, Object> read(String agentSlugName); // 传 mcp-{dept}-{slug} 全名
 

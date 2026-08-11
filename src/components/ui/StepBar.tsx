@@ -18,7 +18,7 @@ export function StepBar({ steps }: { steps: Step[] }) {
             <div
               className={cn(
                 'mt-[11px] h-px flex-1 min-w-6',
-                s.state === 'todo' ? 'bg-line' : s.state === 'blocked' ? 'bg-block/50' : 'bg-ink/50',
+                s.state === 'todo' ? 'bg-line' : s.state === 'blocked' ? 'bg-block/50' : 'bg-brand',
               )}
             />
           )}
@@ -26,8 +26,8 @@ export function StepBar({ steps }: { steps: Step[] }) {
             <span
               className={cn(
                 'flex h-[22px] w-[22px] items-center justify-center rounded-full border text-[11px] font-medium transition-colors duration-300',
-                s.state === 'done' && 'border-ink bg-ink text-white',
-                s.state === 'current' && 'border-ink text-ink',
+                s.state === 'done' && 'border-brand bg-brand text-white',
+                s.state === 'current' && 'border-brand bg-brand-tint text-brand-strong',
                 s.state === 'todo' && 'border-line text-ink-faint',
                 s.state === 'blocked' && 'border-block bg-block text-white',
               )}

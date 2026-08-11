@@ -46,8 +46,11 @@ export function Releases() {
   ]
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4">
-      <h1 className="text-lg font-semibold">发布</h1>
+    <div className="page-shell">
+      <div className="border-b border-line pb-5">
+        <h1 className="page-title">Release 发布</h1>
+        <p className="page-description">查看不可变配置快照、门禁证据、审批人与 Nacos MCP 部署结果。</p>
+      </div>
       {releases.isLoading ? (
         <SkeletonTable rows={6} cols={6} />
       ) : (

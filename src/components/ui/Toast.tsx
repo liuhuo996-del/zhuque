@@ -26,11 +26,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
+      <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex w-[calc(100%-32px)] max-w-lg -translate-x-1/2 flex-col items-center gap-2">
         {items.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto flex items-center gap-3 rounded border border-line bg-ink px-3.5 py-2 text-sm text-white shadow-lg"
+            className="pointer-events-auto flex max-w-full items-center gap-3 rounded-lg border border-ink/80 bg-ink px-4 py-2.5 text-sm text-white shadow-xl"
           >
             <span>{t.message}</span>
             {t.actionLabel && (

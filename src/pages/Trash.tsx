@@ -80,10 +80,10 @@ export function Trash() {
   ]
 
   return (
-    <div className="flex max-w-5xl flex-col gap-5">
-      <div>
-        <h1 className="text-lg font-semibold">回收站</h1>
-        <p className="mt-1 text-xs leading-5 text-ink-muted">
+    <div className="page-shell">
+      <div className="border-b border-line pb-5">
+        <h1 className="page-title">回收站</h1>
+        <p className="page-description">
           移入回收站只停止使用并从普通列表隐藏。已有 Release、审批、测试、门禁、部署和 spec_hash 证据永久保留；只有从未进入证据链的纯草稿才能永久删除。
         </p>
       </div>

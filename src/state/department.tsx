@@ -7,10 +7,16 @@ const Ctx = createContext<{ deptId: string; setDeptId: (id: string) => void }>({
 })
 
 export function DepartmentProvider({ children }: { children: ReactNode }) {
-  const [deptId, setDeptIdState] = useState(() => window.localStorage.getItem('zhuque.department') || 'all')
+  const [deptId, setDeptIdState] = useState(() => {
+    const current = window.localStorage.getItem('gateforge.department')
+    if (current) return current
+    const legacy = window.localStorage.getItem('zhuque.department')
+    if (legacy) window.localStorage.setItem('gateforge.department', legacy)
+    return legacy || 'all'
+  })
   const setDeptId = useCallback((id: string) => {
     setDeptIdState(id)
-    window.localStorage.setItem('zhuque.department', id)
+    window.localStorage.setItem('gateforge.department', id)
   }, [])
   return <Ctx.Provider value={{ deptId, setDeptId }}>{children}</Ctx.Provider>
 }

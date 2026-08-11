@@ -9,7 +9,6 @@ export interface Column<T> {
   render: (row: T) => ReactNode
 }
 
-// 高密度控制台表格：行高 36px，表头灰阶，无斑马纹。
 export function DataTable<T>({ columns, rows, rowKey, onRowClick, empty }: {
   columns: Column<T>[]
   rows: T[]
@@ -18,19 +17,19 @@ export function DataTable<T>({ columns, rows, rowKey, onRowClick, empty }: {
   empty?: ReactNode
 }) {
   if (rows.length === 0 && empty) {
-    return <div className="rounded border border-line bg-surface">{empty}</div>
+    return <div className="overflow-hidden rounded-lg border border-line bg-surface shadow-panel">{empty}</div>
   }
   return (
-    <div className="overflow-x-auto rounded border border-line bg-surface">
+    <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-panel">
       <table className="w-full border-collapse text-sm">
-        <thead>
+        <thead className="bg-[#f8fafc]">
           <tr className="border-b border-line">
             {columns.map((c) => (
               <th
                 key={c.key}
                 style={{ width: c.width }}
                 className={cn(
-                  'h-9 px-3 text-xs font-medium text-ink-muted whitespace-nowrap',
+                  'h-10 px-4 text-xs font-semibold text-ink-muted whitespace-nowrap',
                   c.align === 'right' ? 'text-right' : 'text-left',
                 )}
               >
@@ -45,14 +44,14 @@ export function DataTable<T>({ columns, rows, rowKey, onRowClick, empty }: {
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={cn(
-                'border-b border-line last:border-b-0',
-                onRowClick && 'cursor-pointer hover:bg-canvas',
+                'border-b border-line last:border-b-0 transition-colors duration-100',
+                onRowClick ? 'cursor-pointer hover:bg-brand-tint' : 'hover:bg-surface-subtle',
               )}
             >
               {columns.map((c) => (
                 <td
                   key={c.key}
-                  className={cn('h-9 px-3 whitespace-nowrap', c.align === 'right' ? 'text-right' : 'text-left')}
+                  className={cn('h-11 px-4 whitespace-nowrap', c.align === 'right' ? 'text-right' : 'text-left')}
                 >
                   {c.render(row)}
                 </td>

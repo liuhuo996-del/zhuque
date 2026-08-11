@@ -2,6 +2,9 @@ package com.zhuque.m6_testing;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -50,7 +53,24 @@ public class L1ContractTester {
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+    /**
+     * L1 已在真正发请求前按精确 origin 做服务端白名单校验，因此不能再继承宿主机的
+     * HTTP/SOCKS 代理。否则允许的内网测试地址可能被送到环境代理，既泄漏目标信息，
+     * 也会把代理返回的 502 误记成上游契约失败。
+     */
+    private static final ProxySelector DIRECT_ONLY = new ProxySelector() {
+        @Override
+        public List<Proxy> select(URI uri) {
+            return List.of(Proxy.NO_PROXY);
+        }
+
+        @Override
+        public void connectFailed(URI uri, SocketAddress address, IOException error) {
+            // 直连没有可切换的备用代理；HttpClient 会把原始连接异常交给调用方。
+        }
+    };
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+            .proxy(DIRECT_ONLY)
             // 不能让受测目标借 30x 把 L1 转发到未审核的第二个 origin。
             .followRedirects(HttpClient.Redirect.NEVER).build();
     private final ControlPlaneRepository repository;

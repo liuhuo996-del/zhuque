@@ -1,6 +1,5 @@
 import type { Config } from 'tailwindcss'
 
-// P1.0 设计 token。颜色语义：界面上出现颜色 = 系统做出了一个判断。
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
@@ -8,7 +7,15 @@ export default {
       colors: {
         canvas: 'var(--canvas)',
         surface: 'var(--surface)',
+        'surface-subtle': 'var(--surface-subtle)',
         line: 'var(--border)',
+        'line-strong': 'var(--border-strong)',
+        brand: {
+          DEFAULT: 'var(--brand)',
+          strong: 'var(--brand-strong)',
+          hover: 'var(--brand-hover)',
+          tint: 'var(--brand-tint)',
+        },
         ink: {
           DEFAULT: 'var(--ink)',
           muted: 'var(--ink-muted)',
@@ -31,6 +38,14 @@ export default {
         base: ['14px', '22px'],
         lg: ['16px', '24px'],
         xl: ['20px', '28px'],
+      },
+      borderRadius: {
+        DEFAULT: '6px',
+        md: '7px',
+        lg: '10px',
+      },
+      boxShadow: {
+        panel: 'var(--shadow-panel)',
       },
     },
   },

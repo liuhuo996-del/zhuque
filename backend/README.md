@@ -1,6 +1,16 @@
-# 朱雀后端骨架
+# GateForge 后端
 
 Java 17 + Spring Boot 3 + PostgreSQL 15。全量契约见项目根 `CLAUDE.md`。
+
+## 发布边界
+
+GateForge 每次发布只写 Nacos 3 原生 MCP Registry，并在成功前读回完整的 MCP
+detail 与 endpoint。Higress 由平台侧一次性手工配置 Nacos3 服务来源、MCP/Redis
+能力、路由策略和鉴权；随后由 Higress watcher 自动发现 Nacos MCP 并生成数据面
+路由。GateForge 不登录或修改 Higress Console，因此网关升级不会阻塞 Release 发布。
+
+`GET /api/deploy/precheck` 只检查 Nacos AI MCP Admin API。Higress 的运行面健康度
+应由网关自身监控与发布流程负责。
 
 **当前状态：控制面实现已接入 PostgreSQL 迁移与 HTTP API。**
 数据库由 Flyway 从 `db/migration` 初始化；迁移不写入演示数据。**新建空数据库**首次启动为空库；已有数据库绝不会被应用自动清空，历史测试数据如需清理应先备份并走受控运维流程。
@@ -16,7 +26,7 @@ Java 17 + Spring Boot 3 + PostgreSQL 15。全量契约见项目根 `CLAUDE.md`�
 | `m5_release` | Release 状态机 | ReleaseStateMachine（迁移表唯一裁决）、ManifestCompiler（冻结五件事）、VersionSuggester、ReleaseService |
 | `m6_testing` | 三层测试 | L0StaticChecker（零依赖）、L1ContractTester（真实测试/预发上游）、L2AgentEvaluator（只测选工具准确率，model_meta 必填）、TestCaseService |
 | `m7_gate` | 门禁 | GateRule 接口 + BuiltinRules 清单 + GateEngine（逐条落库、豁免、规则集版本化） |
-| `m8_deploy` | 双 target 发布 | DeployTarget 接口、NacosTarget（Admin API）、**HigressAuthTarget（网关知识只许在这一个类）**、DualTargetPublisher（快照→先鉴权后工具→失败逆向恢复）、DeployPrecheck |
+| `m8_deploy` | Nacos MCP 发布 | DeployTarget 接口、NacosTarget（AI MCP Admin API）、DualTargetPublisher（快照→发布→读回→失败恢复）、DeployPrecheck；Higress 由运行平台独立维护 |
 | `m9_drift` | 漂移检测 | SpecDriftDetector（复用 M1 diff）、ConfigDriftDetector（读回比对 + 重放修复） |
 | `m10_org` | 组织与凭证 | DepartmentService（同步建 consumer group）、AgentLifecycleService、KeyService（明文永不落库） |
 | `metrics` | 北极星指标 | NorthStarMetrics（首次推荐精确率，按部门） |

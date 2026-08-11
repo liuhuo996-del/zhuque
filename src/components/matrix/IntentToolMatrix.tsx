@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import type { HitMap, Intent, Tool } from '@/types'
 
 /**
- * 意图 × 工具覆盖矩阵 —— 朱雀的签名界面。
+ * 意图 × 工具覆盖矩阵 —— GateForge 的签名治理界面。
  * 行=意图，列=候选工具，格子=命中。增删是列级操作，格子不可编辑。
  * 任何增删后闭包/预算/风险实时重算（纯派生状态，无手动刷新）。
  */
@@ -112,7 +112,7 @@ export function IntentToolMatrix({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-4">
+      <div className="flex flex-col gap-4 2xl:flex-row">
         {/* ---- 矩阵主区 ---- */}
         <div className="min-w-0 flex-1 overflow-x-auto rounded border border-line bg-surface">
           <table className="border-collapse">
@@ -287,7 +287,7 @@ export function IntentToolMatrix({
         </div>
 
         {/* ---- 右侧栏 ---- */}
-        <aside className="flex w-[300px] shrink-0 flex-col gap-3">
+        <aside className="grid w-full shrink-0 grid-cols-1 gap-3 md:grid-cols-3 2xl:flex 2xl:w-[300px] 2xl:flex-col">
           {/* 1) 闭包检查 */}
           <section className="rounded border border-line bg-surface p-4">
             <h3 className="text-xs font-semibold text-ink-muted">闭包检查</h3>

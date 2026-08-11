@@ -74,6 +74,167 @@ class OpenApiImportTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void preservesOneOfAndAnyOfAsStandardJsonSchemaBranches() {
+        String spec = """
+                openapi: 3.0.3
+                info: { title: Composition, version: 1.0.0 }
+                components:
+                  schemas:
+                    ById:
+                      type: object
+                      required: [id]
+                      properties:
+                        id: { type: string }
+                    ByCode:
+                      type: object
+                      required: [code]
+                      properties:
+                        code: { type: integer }
+                paths:
+                  /composition:
+                    get:
+                      responses:
+                        '200':
+                          description: ok
+                          content:
+                            application/json:
+                              schema:
+                                type: object
+                                properties:
+                                  choice:
+                                    oneOf:
+                                      - $ref: '#/components/schemas/ById'
+                                      - $ref: '#/components/schemas/ByCode'
+                                  filter:
+                                    anyOf:
+                                      - { type: string, minLength: 2 }
+                                      - { type: integer, minimum: 1 }
+                """;
+
+        Map<String, Object> response = new OpenApiParser().parse(spec).endpoints().get(0).responseSchema();
+        Map<String, Object> properties = (Map<String, Object>) response.get("properties");
+        Map<String, Object> choice = (Map<String, Object>) properties.get("choice");
+        List<Map<String, Object>> oneOf = (List<Map<String, Object>>) choice.get("oneOf");
+        Map<String, Object> filter = (Map<String, Object>) properties.get("filter");
+        List<Map<String, Object>> anyOf = (List<Map<String, Object>>) filter.get("anyOf");
+
+        assertFalse(choice.containsKey("properties"));
+        assertFalse(choice.containsKey("required"));
+        assertFalse(choice.containsKey("x-variant-of"));
+        assertEquals(2, oneOf.size());
+        assertEquals(List.of("id"), oneOf.get(0).get("required"));
+        assertEquals(List.of("code"), oneOf.get(1).get("required"));
+        assertEquals(2, anyOf.size());
+        assertEquals("string", anyOf.get(0).get("type"));
+        assertEquals(2, anyOf.get(0).get("minLength"));
+        assertEquals("integer", anyOf.get(1).get("type"));
+        assertEquals("1", String.valueOf(anyOf.get(1).get("minimum")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void allOfKeepsEveryBranchConstraintWhileMergingObjectShape() {
+        String spec = """
+                openapi: 3.0.3
+                info: { title: AllOf, version: 1.0.0 }
+                components:
+                  schemas:
+                    Identity:
+                      type: object
+                      additionalProperties: false
+                      required: [id]
+                      properties:
+                        id: { type: string, pattern: '^[A-Z]+$' }
+                    Counted:
+                      type: object
+                      required: [count]
+                      properties:
+                        count: { type: integer, minimum: 1, maximum: 10 }
+                paths:
+                  /combined:
+                    get:
+                      responses:
+                        '200':
+                          description: ok
+                          content:
+                            application/json:
+                              schema:
+                                allOf:
+                                  - $ref: '#/components/schemas/Identity'
+                                  - $ref: '#/components/schemas/Counted'
+                """;
+
+        Map<String, Object> schema = new OpenApiParser().parse(spec).endpoints().get(0).responseSchema();
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        List<Map<String, Object>> allOf = (List<Map<String, Object>>) schema.get("allOf");
+        List<String> required = (List<String>) schema.get("required");
+
+        assertEquals("object", schema.get("type"));
+        assertEquals(2, required.size());
+        assertTrue(required.containsAll(List.of("id", "count")));
+        assertTrue(properties.containsKey("id"));
+        assertTrue(properties.containsKey("count"));
+        assertTrue(schema.containsKey("allOf"), schema::toString);
+        assertEquals(2, allOf.size());
+        assertEquals(false, allOf.get(0).get("additionalProperties"));
+        Map<String, Object> firstProperties = (Map<String, Object>) allOf.get(0).get("properties");
+        assertEquals("^[A-Z]+$", ((Map<String, Object>) firstProperties.get("id")).get("pattern"));
+        Map<String, Object> secondProperties = (Map<String, Object>) allOf.get(1).get("properties");
+        Map<String, Object> count = (Map<String, Object>) secondProperties.get("count");
+        assertEquals("1", String.valueOf(count.get("minimum")));
+        assertEquals("10", String.valueOf(count.get("maximum")));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void convertsNullableWithoutPublishingTheOpenApiNullableKeyword() {
+        String spec = """
+                openapi: 3.0.3
+                info: { title: Nullable, version: 1.0.0 }
+                paths:
+                  /nullable:
+                    get:
+                      parameters:
+                        - name: nickname
+                          in: query
+                          schema: { type: string, nullable: true, minLength: 1 }
+                        - name: plain
+                          in: query
+                          schema: { type: string, nullable: false }
+                        - name: composed
+                          in: query
+                          schema:
+                            nullable: true
+                            oneOf:
+                              - { type: string }
+                              - { type: integer }
+                      responses:
+                        '204': { description: ok }
+                """;
+
+        Map<String, Object> parameters = new OpenApiParser().parse(spec).endpoints().get(0).parameters();
+        Map<String, Object> nickname = (Map<String, Object>)
+                ((Map<String, Object>) parameters.get("query:nickname")).get("schema");
+        Map<String, Object> plain = (Map<String, Object>)
+                ((Map<String, Object>) parameters.get("query:plain")).get("schema");
+        Map<String, Object> composed = (Map<String, Object>)
+                ((Map<String, Object>) parameters.get("query:composed")).get("schema");
+
+        assertEquals(List.of("string", "null"), nickname.get("type"));
+        assertEquals(1, nickname.get("minLength"));
+        assertFalse(nickname.containsKey("nullable"));
+        assertEquals("string", plain.get("type"));
+        assertFalse(plain.containsKey("nullable"));
+
+        assertFalse(composed.containsKey("nullable"));
+        List<Map<String, Object>> nullableAnyOf = (List<Map<String, Object>>) composed.get("anyOf");
+        assertEquals(2, nullableAnyOf.size());
+        assertTrue(nullableAnyOf.get(0).containsKey("oneOf"));
+        assertEquals("null", nullableAnyOf.get(1).get("type"));
+    }
+
+    @Test
     void controllerImportsUploadedYamlAsRawToolsAndRecordsAuditEvidence() {
         RecordingRepository repository = new RecordingRepository();
         ToolPoolController controller = controller(repository);

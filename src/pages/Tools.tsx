@@ -137,11 +137,11 @@ export function Tools() {
   const selectedSource = activeSource === 'all' ? null : sources.data?.find((source) => source.id === activeSource) ?? null
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+    <div className="page-shell">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
         <div>
-          <h1 className="text-lg font-semibold">工具池</h1>
-          <p className="mt-1 text-xs text-ink-muted">只显示用户正式导入的 REST API；数据库不预置示例来源。</p>
+          <h1 className="page-title">工具池</h1>
+          <p className="page-description">导入、富化并复核企业 REST API，形成可发布的工具资产。</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => { setImportOpen(true); setOperationError(null) }}>导入 OpenAPI</Button>
@@ -156,8 +156,8 @@ export function Tools() {
       )}
       {operationError && <ErrorState what={operationError.what} fix={operationError.fix} />}
 
-      <div className="flex gap-4">
-        <aside className="w-[250px] shrink-0">
+      <div className="flex flex-col gap-4 xl:flex-row">
+        <aside className="w-full shrink-0 xl:w-[250px]">
           <div className="rounded border border-line bg-surface">
             <button onClick={() => setActiveSource('all')} className={cn('flex h-9 w-full items-center px-3 text-sm', activeSource === 'all' ? 'bg-canvas font-medium' : 'hover:bg-canvas')}>
               全部来源
@@ -241,7 +241,7 @@ function ImportDrawer({ open, onClose, onImported }: { open: boolean; onClose: (
   return (
     <Drawer open={open} onClose={onClose} title="导入 OpenAPI" width={560}>
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="来源名称"><input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="订单系统" /></Field>
           <Field label="来源 slug（可选）"><input className="input font-mono" value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="orders" /></Field>
         </div>

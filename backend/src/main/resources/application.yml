@@ -1,6 +1,6 @@
 spring:
   application:
-    name: zhuque
+    name: gateforge
   datasource:
     url: jdbc:postgresql://localhost:5432/zhuque
     username: zhuque
@@ -14,22 +14,19 @@ server:
   port: ${SERVER_PORT:8081}
 
 zhuque:
-  # M8 发布目标。凭据走环境变量，不写进代码库。
-  higress:
-    console-url: ${HIGRESS_CONSOLE_URL:http://localhost:8001}
-    username: ${HIGRESS_USERNAME:}
-    password: ${HIGRESS_PASSWORD:}
-    # 最低版本要求，DeployPrecheck 用 GET /system/info 校验
-    min-version: "2.2.0"
-    # 无法从 Console 安全探测的部署前置条件必须由运维显式确认；默认 false 会阻止发布。
-    redis-ready: ${ZHUQUE_HIGRESS_REDIS_READY:false}
-    mcp-enabled: ${ZHUQUE_HIGRESS_MCP_ENABLED:false}
+  # Higress Nacos3 MCP Bridge 对外路径：{base}/{mcp-server-name}/sse
+  mcp-public-base-url: ${ZHUQUE_MCP_PUBLIC_BASE_URL:http://localhost:8080/mcp}
+  # M8 唯一发布目标。Higress 的 Nacos3 source、路由和鉴权由运行平台维护。
   nacos:
     server-url: ${NACOS_SERVER_URL:http://localhost:8848}
     namespace: ${NACOS_NAMESPACE:public}
     username: ${NACOS_USERNAME:}
     password: ${NACOS_PASSWORD:}
     min-version: "3.0.1"
+    # Nacos AI Registry 写入后 detail 是最终一致的；发布与回滚共用该有界窗口。
+    mcp-visible-timeout: ${ZHUQUE_NACOS_MCP_VISIBLE_TIMEOUT:PT30S}
+    mcp-poll-interval: ${ZHUQUE_NACOS_MCP_POLL_INTERVAL:PT0.25S}
+    mcp-delete-settle-window: ${ZHUQUE_NACOS_MCP_DELETE_SETTLE_WINDOW:PT2S}
 
   # M9 漂移检测的默认扫描间隔（可配）
   drift:

@@ -34,8 +34,9 @@ import io.swagger.v3.parser.core.models.SwaggerParseResult;
  *
  * 必须处理：
  * - 展开 $ref（含跨文件 ref 可先不支持，报清晰错误）
- * - 合并 allOf
- * - oneOf/anyOf：取属性并集，并在结果上标注 variantOf 信息（富化和 L0 检查要用）
+ * - allOf 保留标准组合约束，并兼容性合并 properties / required
+ * - oneOf/anyOf 保留标准 JSON Schema 分支，不把互斥/可选语义扁平化
+ * - OpenAPI 3.0 nullable 转成标准 JSON Schema null 类型表达
  * - 继承 path 级 parameters 到每个 operation
  *
  * 容错纪律：不合规文档逐 endpoint 报错，不整体失败。
@@ -70,7 +71,7 @@ public class OpenApiParser {
     /**
      * 功能：解析入口。specText 为文档原文（JSON 或 YAML）。
      * 实现提示：swagger-parser 做底座（ResolveFully 展开 $ref），
-     * allOf 合并与 oneOf 并集要自己遍历 schema 树完成。
+     * 组合 schema 与 nullable 的 JSON Schema 语义要自己遍历 schema 树完成。
      */
     public ParseResult parse(String specText) {
         return parse(specText, null);
@@ -85,7 +86,9 @@ public class OpenApiParser {
         ParseOptions options = new ParseOptions();
         options.setResolve(true);
         options.setResolveFully(true);
+        options.setResolveCombinators(false);
         options.setFlatten(false);
+        options.setFlattenComposedSchemas(false);
         SwaggerParseResult parsed = new OpenAPIV3Parser().readContents(specText, null, options);
         OpenAPI api = parsed.getOpenAPI();
         if (api == null) {
@@ -299,7 +302,6 @@ public class OpenApiParser {
             put(result, "title", schema.getTitle());
             put(result, "default", schema.getDefault());
             put(result, "example", schema.getExample());
-            put(result, "nullable", schema.getNullable());
             put(result, "readOnly", schema.getReadOnly());
             put(result, "writeOnly", schema.getWriteOnly());
             put(result, "minimum", schema.getMinimum());
@@ -329,9 +331,10 @@ public class OpenApiParser {
             } else if (schema.getAdditionalProperties() != null) {
                 result.put("additionalProperties", schema.getAdditionalProperties());
             }
-            mergeCompositions(result, schema.getAllOf(), "allOf", depth, visiting, true);
-            mergeCompositions(result, schema.getOneOf(), "oneOf", depth, visiting, false);
-            mergeCompositions(result, schema.getAnyOf(), "anyOf", depth, visiting, false);
+            mergeAllOf(result, schema.getAllOf(), depth, visiting);
+            preserveComposition(result, schema.getOneOf(), "oneOf", depth, visiting);
+            preserveComposition(result, schema.getAnyOf(), "anyOf", depth, visiting);
+            applyNullable(result, schema.getNullable());
             if (result.isEmpty() && schema.get$ref() != null) {
                 throw new IllegalArgumentException("$ref 无法展开：" + schema.get$ref());
             }
@@ -341,16 +344,33 @@ public class OpenApiParser {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private void mergeCompositions(Map<String, Object> target, List<Schema> variants, String kind,
-                                   int depth, Set<Schema<?>> visiting, boolean allOf) {
+    private void preserveComposition(Map<String, Object> target, List<Schema> variants, String kind,
+                                     int depth, Set<Schema<?>> visiting) {
         if (variants == null || variants.isEmpty()) {
             return;
         }
-        List<String> variantNames = new ArrayList<>();
-        for (int index = 0; index < variants.size(); index++) {
-            Schema<?> variant = variants.get(index);
+        List<Map<String, Object>> expanded = new ArrayList<>(variants.size());
+        for (Schema<?> variant : variants) {
+            expanded.add(schemaToMap(variant, depth + 1, visiting));
+        }
+        target.put(kind, List.copyOf(expanded));
+    }
+
+    /**
+     * allOf 的 properties / required 合并供现有工具生成链路继续直接读取；标准 allOf
+     * 数组同时保留，避免 minimum、pattern、additionalProperties 等约束在扁平化时丢失。
+     */
+    @SuppressWarnings("unchecked")
+    private void mergeAllOf(Map<String, Object> target, List<Schema> variants,
+                            int depth, Set<Schema<?>> visiting) {
+        if (variants == null || variants.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> expandedVariants = new ArrayList<>(variants.size());
+        for (Schema<?> variant : variants) {
             Map<String, Object> expanded = schemaToMap(variant, depth + 1, visiting);
+            expandedVariants.add(expanded);
+
             Object properties = expanded.get("properties");
             if (properties instanceof Map<?, ?> propertyMap) {
                 Map<String, Object> merged = (Map<String, Object>) target.computeIfAbsent(
@@ -365,13 +385,30 @@ public class OpenApiParser {
                 values.forEach(value -> merged.add(String.valueOf(value)));
                 target.put("required", List.copyOf(merged));
             }
-            variantNames.add(firstNonBlank(variant.getName(), variant.getTitle(), kind + "[" + index + "]"));
-            if (allOf) {
-                expanded.forEach(target::putIfAbsent);
-            }
         }
-        if (!allOf) {
-            target.put("x-variant-of", variantNames);
+        target.put("allOf", List.copyOf(expandedVariants));
+    }
+
+    /** OpenAPI 3.0 nullable 不是 JSON Schema 关键字，发布前转换或移除。 */
+    private static void applyNullable(Map<String, Object> schema, Boolean nullable) {
+        if (!Boolean.TRUE.equals(nullable)) {
+            return;
+        }
+        Object type = schema.get("type");
+        if (type instanceof String value && !"null".equals(value)) {
+            schema.put("type", List.of(value, "null"));
+            return;
+        }
+        if (type instanceof List<?> values) {
+            LinkedHashSet<Object> nullableTypes = new LinkedHashSet<>(values);
+            nullableTypes.add("null");
+            schema.put("type", List.copyOf(nullableTypes));
+            return;
+        }
+        if (!schema.isEmpty()) {
+            Map<String, Object> nonNullSchema = new LinkedHashMap<>(schema);
+            schema.clear();
+            schema.put("anyOf", List.of(nonNullSchema, Map.of("type", "null")));
         }
     }
 
