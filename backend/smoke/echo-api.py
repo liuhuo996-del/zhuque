@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-"""Temporary REST backend for the Zhuque → Nacos → Higress MCP smoke test."""
+"""Temporary REST backend for the GateForge → Nacos → Higress MCP smoke test."""
 
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-BASE_URL = os.getenv("ZHUQUE_SMOKE_BASE_URL", "http://127.0.0.1:19090").rstrip("/")
+BASE_URL = os.getenv("GATEFORGE_SMOKE_BASE_URL", "http://127.0.0.1:19090").rstrip("/")
 
 OPENAPI = {
     "openapi": "3.0.3",
-    "info": {"title": "Zhuque Smoke Echo API", "version": "1.0.0"},
+    "info": {"title": "GateForge Smoke Echo API", "version": "1.0.0"},
     "servers": [{"url": BASE_URL}],
     "paths": {
         "/smoke": {
             "get": {
                 "operationId": "getSmokeStatus",
-                "summary": "返回朱雀冒烟服务状态，用于端到端 MCP 注册验证",
-                "x-zhuque-l1": {
-                    "testSafe": True,
-                    "fixture": "smoke-status-v1",
-                },
+                "summary": "返回 GateForge 冒烟服务状态，用于端到端 MCP 注册验证",
                 "responses": {
                     "200": {
                         "description": "冒烟服务正常",
@@ -38,7 +34,7 @@ OPENAPI = {
                                 },
                                 "example": {
                                     "ok": True,
-                                    "service": "zhuque-smoke",
+                                    "service": "gateforge-smoke",
                                     "source": "real-rest-upstream",
                                 },
                             }
@@ -73,7 +69,7 @@ OPENAPI = {
                                         "source": {"type": "string"},
                                     },
                                 },
-                                "example": {"message": "hello", "source": "zhuque-smoke-rest"},
+                                "example": {"message": "hello", "source": "gateforge-smoke-rest"},
                             }
                         },
                     }
@@ -95,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "ok": True,
-                    "service": "zhuque-smoke",
+                    "service": "gateforge-smoke",
                     "source": "real-rest-upstream",
                 },
             )
@@ -105,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             if not message:
                 self.respond(400, {"error": "message is required"})
                 return
-            self.respond(200, {"message": message, "source": "zhuque-smoke-rest"})
+            self.respond(200, {"message": message, "source": "gateforge-smoke-rest"})
             return
         if parsed.path == "/health":
             self.respond(200, {"ok": True})

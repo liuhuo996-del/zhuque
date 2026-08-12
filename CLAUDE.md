@@ -1,127 +1,78 @@
-# GateForge v1
+# GateForge
 
-你在开发「GateForge」v1（历史代码包名保留 `zhuque`）。以下是必须遵守的上下文，任何实现都不得违背。
+GateForge 是面向企业存量 API 的 **API → 高质量 MCP 能力包自动工程化平台**。
 
-## 产品是什么
+## 不可突破的系统边界
 
-GateForge 是企业数字员工的能力发布控制面。它把企业的 REST API 池，编译成经过
-测试、审批、版本化、可回滚的「数字员工能力」，以声明式方式发布到 Nacos，
-由 Higress 网关执行。
-
-一句话：GateForge 不回答"怎么把 API 变成 MCP"，它回答"凭什么让这个数字员工
-带着这些工具上线"。
-
-## 三方分工（关键，不要越界）
-
-```
-GateForge—— 纯控制面。不在任何调用链上，不收发 MCP 协议消息。
-          只生产静态 JSON 配置 + 证据记录。
-Nacos  —— 配置面。存 MCP service 定义（tools/描述/inputSchema/参数映射
-          模板/后端引用），提供版本历史、灰度、回滚、密钥加密托管。
-Higress—— 数据面，也是真正的 MCP Server。终结 MCP 协议
-          （SSE / streamable HTTP + JSON-RPC），执行 MCP↔REST 转换、
-          入口鉴权、限流、日志。
+```text
+GateForge = MCP 工程加工 / 编译 / 质量与治理引擎
+Nacos     = 注册 / 版本 / 生命周期 / 服务发现控制面
+Higress   = MCP/API 网关与运行数据面
+智能体    = 规划与执行
 ```
 
-明确不要实现：MCP 协议服务端、API 网关、服务注册表、配置版本存储、
-开发者门户 / 市场。这些由 Higress / Nacos 承担。
+GateForge 不实现注册中心、配置版本中心、发布生命周期、服务发现、MCP 服务、
+API 网关、智能体生命周期、运行时鉴权、业务请求代理或工具调用数据面。
 
-## 名词表（UI 用左列，代码用右列）
+GateForge 只能通过 Nacos 官方 AI/MCP 管理接口交互。Nacos 是唯一注册中心和
+生命周期控制面；Higress 从 Nacos 发现 MCP 并承担最终数据面。
 
+## 固定加工链路
+
+```text
+OpenAPI / REST API
+→ 接入与分析
+→ AI 富化
+→ 意图聚类
+→ MCP 能力包构建
+→ 治理元数据
+→ 依赖图
+→ 自动测试
+→ 闭包检查
+→ MCP 能力包构建产物
+→ Nacos 适配器
+→ Nacos
+→ Higress
+→ 智能体 / OpenClaw
 ```
-数字部门   Department   —— 映射到网关的一个 consumer group
-数字员工   Agent        —— 一个 ServiceAccount，对外是一个 MCP URL
-工具池     ToolPool     —— 富化过的 Tool 集合，公司级资产，跨部门共享
-意图       Intent       —— 从职责描述拆出的原子任务，是可审核对象
-能力包     Pack         —— 按业务意图组合的 Tool 集合，可跨多个 API 来源
-闭包检查   ClosureCheck —— 验证包内每个 Tool 的必填参数是否都拿得到
-Release                 —— 不可变快照 = 配置产物 + 证据包
-门禁       Gate         —— 一组硬规则，决定 Release 能否发布
-漂移       Drift        —— 上游 spec 变更 / 线上配置与记录不符
-```
+
+## 数据边界
+
+GateForge 只保存以下工程数据：
+
+- `api_source`：输入规范、摘要、基础地址、负责人、环境。
+- `tool`：标准 MCP 工具、后端 API 映射、端点、治理附加信息、分析结果。
+- `pack`：不可变 MCP 能力包构建产物和测试证据。
+- `nacos_registration`：Nacos 官方接口回读的服务编号、版本和状态。
+
+禁止重新加入部门、智能体、发布状态机、审批、智能体密钥、门禁决策、部署目标、
+配置漂移或 Higress 控制台管理表。
+
+## MCP 与治理字段
+
+标准 MCP 工具与 GateForge 治理元数据必须分离：
+
+- `toolSpecification.tools[]`：只包含标准 MCP 工具字段。
+- `toolsMeta[tool].templates`：Nacos/Higress API 转换配置。
+- `toolsMeta[tool].invokeContext["com.gateforge/governance"]`：Nacos 3.0.1 可持久化的
+  带命名空间的 JSON 治理附加信息；不能使用会被服务端丢弃的未知 `toolsMeta` 同级字段。
+- 治理字段不能塞进 `inputSchema`，也不能伪装成标准 ToolAnnotations。
+
+当前运行配置是 `MCP 2025-06-18 + Higress 2.2.3`。后续升级必须增加真实
+`tools/list` / `tools/call` 合约测试，不能只修改版本字符串。
 
 ## 技术栈
 
-```
-后端：Java 17 + Spring Boot 3 + PostgreSQL 15（manifest / 报告用 JSONB）
-      （若团队用 Go，换成 Go 1.22 + chi + sqlc，其余约束不变）
-前端：React 18 + TypeScript + Vite + TanStack Query + Tailwind + shadcn/ui
-外部：Nacos ≥ 3.0.1（走 Admin API，不是 client OpenAPI —— 后者发布不了配置）
-      Higress（需支持同步 Nacos 原生 MCP Server 的版本）
-      Higress 的 MCP 功能依赖 Redis，部署前置检查要校验
-```
+- 后端：Python 3.10+、FastAPI、Pydantic v2、HTTPX、SQLite、JSON Schema 2020-12。
+- 前端：React 18、TypeScript、Vite、TanStack Query、Tailwind。
+- 注册中心：Nacos >= 3.0.1 官方 `/nacos/v3/admin/ai/mcp`。
+- 部署：多阶段 Docker 镜像；FastAPI 同时托管前端静态资源，SQLite 只写入 `/data` 持久卷。
 
-## 核心数据模型（前后端共同契约，不得擅自增删字段）
+## 质量规则
 
-```
-department(id, name, slug, consumer_group_ref, created_at)
-
-agent(id, department_id, name, slug, description, forbidden_notes,
-      status, mcp_url, created_at)
-  status: draft | active | suspended | retired
-
-intent(id, agent_id, text, order_no, source)
-  source: ai | human          -- AI 拆的还是人写的，审计要用
-
-api_source(id, name, spec_url, spec_hash, last_fetched_at, env_profile)
-
-tool(id, api_source_id, name, description, input_schema jsonb,
-     request_template jsonb, method, path, effect, enrichment_status,
-     output_fields jsonb, sensitivity_flags jsonb, token_cost, created_at)
-  effect: read | write | delete | unknown
-  enrichment_status: raw | enriched | reviewed
-
-pack(id, department_id, name, scope, created_at)
-  scope: company | department        -- v1 只用 department，字段保留
-
-pack_tool(pack_id, tool_id, added_by, reason, confidence)
-  added_by: ai | human
-
-projection(id, pack_id, name, visibility_condition jsonb)
-  -- v1 固定每个 pack 一条 projection，代码里 1:1 写死
-  -- 但表和外键必须存在，v2 的动态投影靠它
-
-agent_pack(agent_id, pack_id)
-
-release(id, agent_id, version, status, manifest jsonb, manifest_hash,
-        nacos_payload jsonb, higress_auth_payload jsonb,
-        source_spec_hashes jsonb, target_constraints jsonb, created_at)
-  -- higress_auth_payload 仅保留历史兼容；新 Release 写空对象，不参与发布
-  status: draft | candidate | tested | approved | released
-          | superseded | rolled_back
-
-test_report(id, release_id, layer, case_id, result, detail jsonb,
-            model_meta jsonb)
-  layer: L0 | L1 | L2
-  model_meta: 评测用的模型名/版本/温度/prompt 模板版本（L2 必填）
-
-gate_decision(id, release_id, rule_id, verdict, waived_by, waiver_reason)
-
-approval(id, release_id, manifest_hash, approver, decided_at, decision)
-  -- 审批签的是 manifest_hash，不是 release_id
-
-deploy_record(id, release_id, target, payload_hash, applied_at, result)
-  target: nacos | higress_auth
-  -- 新发布只写 nacos；higress_auth 仅用于读取历史记录
-
-drift_event(id, scope_type, scope_id, kind, detail jsonb,
-            detected_at, status)
-  kind: spec | config
-
-agent_key(id, agent_id, key_ref, rotated_at, revoked_at)
-  -- 只存引用，明文 key 不落库
-```
-
-## 全局硬约束
-
-1. 自动的是「生成候选 + 跑测试」，发布必须人点。任何"一键自动发布"
-   的实现都是错的。
-2. Release 冻结后 manifest 不可改；要改就开新 Release。
-3. 审批绑定 manifest_hash：内容一变，已有审批自动失效。
-4. Release 存全量快照，不存 diff。回滚 = 旧快照原样重放。
-5. GateForge 发布只写 Nacos 3 原生 MCP Registry；失败恢复 Nacos 快照。
-   Higress 的 Nacos3 source、路由和鉴权由运行平台手工独立维护，不能阻塞 Release。
-6. 命名规则 mcp-{department_slug}-{agent_slug} 生成后落库，
-   后续 reconcile / 回滚全靠它对账，生成后不可变更。
-7. 发布、回滚、漂移和生命周期不得调用 Higress Console 写接口；运行时网关
-   通过 Nacos 自动发现，GateForge 不进入 Agent 调用链。
+- 分析器可自动拒绝已废弃、运行探针、重复和输入结构过大的 API。
+- L0 必须覆盖结构规范、参数边界、安全、权限和五类闭包。
+- L1 只能访问显式允许列表中的测试来源地址；写操作默认禁止。
+- L2 负责工具语义区分；没有真实模型时必须标记确定性降级模式。
+- 被阻断的能力包可保存用于修复，但不能提交 Nacos。
+- 构建产物不等于发布版本；版本与生命周期由 Nacos 管理。

@@ -10,7 +10,13 @@
 node_modules/
 dist/
 
-# Backend build output
+# Backend environments, build output and local data
+backend/.venv/
+backend/.pytest_cache/
+backend/__pycache__/
+backend/**/*.pyc
+backend/*.egg-info/
+backend/data/
 backend/target/
 
 # Local environment and secrets

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
- * 可折叠 JSON 查看器（等宽）。diffWith 打开后：与上一版逐行对比，
+ * 可折叠 JSON 查看器（等宽）。开启差异对比后与上一版逐行比较，
  * 仅出现在当前版的行高亮（v1 的轻量级配置对比）。
  */
 export function JsonBlock({ title, data, diffWith, defaultOpen = true }: {
@@ -26,7 +26,7 @@ export function JsonBlock({ title, data, diffWith, defaultOpen = true }: {
         {diffWith !== undefined && (
           <label className="flex items-center gap-1.5 font-normal" onClick={(e) => e.stopPropagation()}>
             <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
-            与上一版 diff
+            与上一版对比
           </label>
         )}
       </summary>

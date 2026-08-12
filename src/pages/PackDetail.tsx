@@ -1,0 +1,22 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useParams } from 'react-router-dom'
+import { fetchPack, registerPack, ApiError } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
+import { ErrorState } from '@/components/ui/ErrorState'
+import { JsonBlock } from '@/components/ui/JsonBlock'
+import { useToast } from '@/components/ui/Toast'
+import { zh } from '@/lib/utils'
+
+export function PackDetail() {
+  const { id = '' } = useParams(); const client = useQueryClient(); const toast = useToast()
+  const query = useQuery({ queryKey: ['pack', id], queryFn: () => fetchPack(id) })
+  const registration = useMutation({ mutationFn: () => registerPack(id), onSuccess: async (r) => { toast(`Nacos 已注册 ${r.mcp_name}`); await client.invalidateQueries() } })
+  const pack = query.data
+  if (!pack) return <div className="page-shell">加载能力包…</div>
+  const closure = pack.dependency_graph.closure
+  return <div className="page-shell"><header className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5"><div><div className="flex items-center gap-2"><h1 className="page-title">{pack.name}</h1><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${pack.status === 'ready' ? 'bg-[var(--pass-tint)] text-pass' : 'bg-[var(--block-tint)] text-block'}`}>{zh(pack.status)}</span></div><p className="page-description">{pack.description}</p><code className="mt-2 block text-[11px] text-ink-faint">{pack.artifact_hash}</code></div><Button variant="primary" disabled={pack.status !== 'ready' || registration.isPending} onClick={() => registration.mutate()}>{registration.isPending ? '提交中…' : '提交到 Nacos'}</Button></header>{registration.error && <ErrorState what={(registration.error as ApiError).what} fix={(registration.error as ApiError).fix} />}
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[['工具数', pack.tools.length],['质量分', `${Math.round(pack.test_report.quality_score * 100)}%`],['通过率', `${Math.round(pack.test_report.pass_rate * 100)}%`],['阻断项', pack.test_report.blocking_failures]].map(([k, v]) => <div key={k} className="panel p-4"><div className="text-xs text-ink-faint">{k}</div><div className="mt-1 font-mono text-2xl font-semibold">{v}</div></div>)}</section>
+    <section className="grid items-start gap-5 xl:grid-cols-2"><div className="panel overflow-hidden"><header className="border-b border-line px-5 py-4"><h2 className="font-semibold">自动测试流水线</h2></header>{pack.test_report.cases.map((c) => <div key={c.case_id} className="flex gap-3 border-b border-line px-5 py-3 last:border-0"><span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${c.status === 'pass' ? 'bg-pass' : c.status === 'fail' ? 'bg-block' : 'bg-warn'}`} /><div><div className="flex gap-2"><code className="font-mono text-xs">{c.layer}</code><span className="text-sm font-medium">{zh(c.category)}</span><span className="text-xs text-ink-faint">{zh(c.status)}</span></div><p className="mt-1 text-xs text-ink-muted">{c.detail}</p></div></div>)}</div><div className="panel p-5"><h2 className="font-semibold">闭包检查</h2><div className="mt-4 grid grid-cols-2 gap-3">{Object.entries({ parameter: closure.parameter_closed, type: closure.type_closed, permission: closure.permission_closed, risk: closure.risk_closed, sideEffect: closure.side_effect_closed, cycles: !closure.cycles.length }).map(([key, ok]) => <div key={key} className={`rounded border p-3 text-sm ${ok ? 'border-pass/30 bg-[var(--pass-tint)] text-pass' : 'border-block/30 bg-[var(--block-tint)] text-block'}`}>{ok ? '✓' : '×'} {zh(key)}</div>)}</div><div className="mt-4 text-xs text-ink-muted">{pack.dependency_graph.edges.length} 条依赖边 · {closure.unreachable_tools.length} 个不可达节点</div></div></section>
+    <JsonBlock title="标准 MCP 服务与工具" data={{ server: pack.mcp_server, tools: pack.tools }} /><JsonBlock title="GateForge 治理附加信息" data={pack.governance} /><JsonBlock title="依赖图" data={pack.dependency_graph} /><JsonBlock title="后端 API 映射" data={pack.backend_mappings} /><JsonBlock title="构建清单" data={pack.build_manifest} />
+  </div>
+}

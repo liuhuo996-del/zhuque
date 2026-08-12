@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-// 列表内的轻量查看用 Drawer；Release 详情与新建向导用整页。
+// 列表内的轻量信息用抽屉展示，复杂详情和新建向导使用整页。
 export function Drawer({ open, onClose, title, children, width = 480 }: {
   open: boolean
   onClose: () => void

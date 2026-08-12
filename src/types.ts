@@ -1,204 +1,148 @@
-// 与 CLAUDE.md 数据契约对应的前端类型（字段不得擅自增删）
-
-export type Effect = 'read' | 'write' | 'delete' | 'unknown'
-export type Enrichment = 'raw' | 'enriched' | 'reviewed'
-export type AgentStatus = 'draft' | 'active' | 'suspended' | 'retired'
-export type ReleaseStatus =
-  | 'draft'
-  | 'candidate'
-  | 'tested'
-  | 'approved'
-  | 'released'
-  | 'superseded'
-  | 'rolled_back'
-export type Health = 'ok' | 'drift' | 'failed' | 'none'
-
-export interface Department {
-  id: string
-  name: string
-  slug: string
-  consumerGroupRef: string
-}
+export type JsonObject = Record<string, unknown>
 
 export interface ApiSource {
   id: string
   name: string
-  specUrl: string | null
-  specHash: string
-  lastFetchedAt: string | null
-  envProfile: string
-  toolTotal: number
-  rawCount: number
+  slug: string
+  spec_url: string | null
+  base_url: string
+  environment: 'test' | 'staging' | 'prod'
+  owner: string
+  spec_hash: string
+  imported_at: string
+  operation_count: number
+  accepted_count: number
+  rejected_count: number
+}
+
+export interface GovernanceMetadata {
+  schemaVersion: 'gateforge.governance/v1'
+  intent: string[]
+  domain: string[]
+  readOnly: boolean
+  write: boolean
+  destructive: boolean
+  idempotent: boolean | null
+  sideEffect: 'none' | 'local' | 'external' | 'unknown'
+  riskLevel: 'low' | 'medium' | 'high' | 'critical'
+  approvalRequired: boolean
+  approvalRole: string | null
+  sensitivity: { input: string[]; output: string[] }
+  requires: string[]
+  provides: string[]
+  retryable: boolean
+  timeoutMs: number
+  owner: string
+  qualityScore: number
+  descriptionScore: number
+  schemaScore: number
+  testPassRate: number
 }
 
 export interface Tool {
   id: string
-  apiSourceId: string
-  name: string
-  description: string
+  source_id: string
+  source_name: string
+  source_spec_hash: string
+  accepted: boolean
+  rejection_reasons: string[]
   method: string
   path: string
-  effect: Effect
-  enrichmentStatus: Enrichment
-  tokenCost: number
-  /** 必填参数（inputSchema.required 的抽象） */
-  requires: string[]
-  /** 该工具输出中可作为其他工具入参的字段（闭包检查用） */
-  produces: string[]
-  sensitiveFields: string[]
-  refCount: number
+  operation_id: string
+  standard: {
+    name: string
+    description: string
+    inputSchema: JsonObject
+    annotations: JsonObject
+  }
+  backend_mapping: JsonObject
+  endpoint: JsonObject
+  governance: GovernanceMetadata
+  cluster_key: string
+  fingerprint: string
 }
 
-export interface Intent {
-  id: string
-  text: string
-  orderNo: number
-  source: 'ai' | 'human'
+export interface SemanticCluster {
+  key: string
+  label: string
+  domain: string
+  intent: string
+  tool_ids: string[]
+  tool_count: number
+  source_count: number
+  confidence: number
 }
 
-export interface Agent {
+export interface TestCaseResult {
+  layer: 'L0' | 'L1' | 'L2'
+  category: string
+  case_id: string
+  status: 'pass' | 'fail' | 'warn' | 'skip'
+  score: number
+  detail: string
+  evidence: JsonObject
+}
+
+export interface PackArtifact {
+  schema_version: 'gateforge.mcp-pack/v1'
   id: string
-  departmentId: string
   name: string
   slug: string
   description: string
-  forbiddenNotes: string
-  status: AgentStatus
-  mcpUrl: string
-  health: Health
-  currentVersion: string | null
-  toolCount: number
-  lastReleasedAt: string | null
-  createdAt: string
+  created_at: string
+  status: 'ready' | 'blocked'
+  mcp_server: JsonObject
+  tools: Array<{ name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject }>
+  backend_mappings: JsonObject
+  endpoints: JsonObject[]
+  governance: { schemaVersion: string; digest: string; tools: Record<string, GovernanceMetadata> }
+  dependency_graph: {
+    schema_version: string
+    nodes: Array<{ tool_id: string; requires: string[]; provides: string[] }>
+    edges: Array<{ provider: string; consumer: string; fields: string[] }>
+    closure: {
+      parameter_closed: boolean
+      type_closed: boolean
+      permission_closed: boolean
+      risk_closed: boolean
+      side_effect_closed: boolean
+      cycles: string[][]
+      missing_providers: JsonObject
+      ambiguous_providers: JsonObject
+      unreachable_tools: string[]
+    }
+  }
+  test_report: {
+    schema_version: string
+    cases: TestCaseResult[]
+    pass_rate: number
+    quality_score: number
+    blocking_failures: number
+    generated_at: string
+  }
+  build_manifest: JsonObject
+  artifact_hash: string
 }
 
-export interface Hit {
-  strength: 'strong' | 'weak'
-  reason: string
-  confidence: number
-  matchedFields: string[]
+export interface Registration {
+  pack_id: string
+  nacos_server_id: string
+  nacos_version: string
+  status: string
+  mcp_name: string
+  registered_at: string
+  raw: JsonObject
 }
 
-/** intentId -> toolId -> Hit */
-export type HitMap = Record<string, Record<string, Hit>>
-
-export interface GateDecision {
-  ruleId: string
-  ruleName: string
-  verdict: 'pass' | 'block' | 'waived'
-  detail?: string
-  waivedBy?: string
-  waiverReason?: string
-}
-
-export interface TestCase {
-  layer: 'L0' | 'L1' | 'L2'
-  caseId: string
-  result: 'pass' | 'fail' | 'skip' | 'warn'
-  detail: string
-}
-
-export interface ModelMeta {
-  model: string
-  version: string
-  temperature: number
-  promptTemplate: string
-}
-
-export interface DeployRecord {
-  target: 'nacos' | 'higress_auth'
-  payloadHash: string
-  appliedAt: string
-  result: 'ok' | 'failed'
-  error?: string
-}
-
-export interface Approval {
-  approver: string
-  decidedAt: string
-  decision: 'approved' | 'rejected'
-  manifestHash: string
-}
-
-export interface TimelineStep {
-  status: ReleaseStatus
-  at: string | null
-  by: string | null
-}
-
-export interface Release {
-  id: string
-  agentId: string
-  version: string
-  status: ReleaseStatus
-  manifestHash: string
-  createdAt: string
-  nacosPayload: unknown
-  higressAuthPayload: unknown
-  targetConstraints: { name: string; required: string; current: string; ok: boolean }[]
-  sourceSpecHashes: { source: string; hash: string }[]
-  gates: GateDecision[]
-  tests: TestCase[]
-  modelMeta: ModelMeta | null
-  approvals: Approval[]
-  deploys: DeployRecord[]
-  closureSummary: string
-  timeline: TimelineStep[]
-}
-
-export interface DriftEvent {
-  id: string
-  scopeType: 'api_source' | 'agent'
-  scopeName: string
-  agentId?: string
-  kind: 'spec' | 'config'
-  detail: string
-  detectedAt: string
-  status: 'open' | 'resolved'
-}
-
-export interface AgentKey {
-  id: string
-  agentId: string
-  keyRef: string
-  rotatedAt: string
-  revokedAt: string | null
-}
-
-export interface Pack {
-  id: string
-  departmentId: string
-  name: string
-  scope: 'company' | 'department'
-  toolIds: string[]
-  usedByAgentIds: string[]
-  createdAt: string
-}
-
-/** 核心模型之外的控制面辅助视图；不改变 CLAUDE.md 的共享实体字段。 */
-export interface TrashMetadata {
-  trashedAt: string
-  trashedBy: string
-  trashReason: string
-}
-
-export type TrashedApiSource = ApiSource & TrashMetadata
-
-export interface AuditEvent {
-  id: string
-  actor: string
-  action: 'create' | 'import' | 'trash' | 'restore' | 'purge' | string
-  resourceType: string
-  resourceId: string
-  detail: Record<string, unknown>
-  occurredAt: string
-}
-
-export interface JobProgress {
-  jobId: string
-  total: number
-  done: number
-  currentStep: string
-  state: 'running' | 'done' | 'failed'
-  error: string | null
+export interface Dashboard {
+  sources: number
+  operations: number
+  accepted_tools: number
+  rejected_operations: number
+  clusters: number
+  packs: number
+  ready_packs: number
+  registered_packs: number
+  average_quality: number
+  recent_packs: PackArtifact[]
 }

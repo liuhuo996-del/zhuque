@@ -1,0 +1,92 @@
+openapi: 3.0.3
+info:
+  title: Orders API
+  version: 1.0.0
+servers:
+  - url: https://orders.example.com/v1
+security:
+  - internalApiKey: []
+components:
+  securitySchemes:
+    internalApiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+paths:
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      summary: 查询单个订单及其支付状态
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: 订单唯一标识
+          schema: {type: string, minLength: 3}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: {type: string}
+                  customerId: {type: string}
+                  status: {type: string}
+  /orders/search:
+    get:
+      operationId: searchOrders
+      tags: [Orders]
+      summary: 按客户和状态搜索订单
+      parameters:
+        - name: customerId
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [paid, shipped, cancelled]}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    orderId: {type: string}
+                    status: {type: string}
+  /orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [Orders]
+      summary: 取消尚未履约的订单
+      x-gateforge-governance:
+        approvalRequired: true
+        approvalRole: order-manager
+        riskLevel: high
+        requires: [orderId]
+        provides: [cancellationId]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancellationId: {type: string}
+  /health:
+    get:
+      operationId: health
+      summary: service health
+      responses:
+        '200': {description: ok}
