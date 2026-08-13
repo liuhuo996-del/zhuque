@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+from urllib.parse import urlparse
 
 
 JsonObject = dict[str, Any]
@@ -106,15 +107,24 @@ class PackBuildRequest(BaseModel):
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     description: str | None = None
     cluster_keys: list[str] = Field(default_factory=list)
+    graph_ids: list[str] = Field(default_factory=list)
     tool_ids: list[str] = Field(default_factory=list)
     run_l1: bool = False
     run_l2: bool = True
 
     @model_validator(mode="after")
     def choose_tools(self) -> "PackBuildRequest":
-        if not self.cluster_keys and not self.tool_ids:
-            raise ValueError("至少选择一个 cluster 或 tool")
+        if not self.description and not self.cluster_keys and not self.graph_ids and not self.tool_ids:
+            raise ValueError("填写能力包目标描述，或至少选择一个能力图/原子工具")
         return self
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class TestCaseResult(BaseModel):
@@ -167,8 +177,73 @@ class DependencyGraph(BaseModel):
     closure: ClosureReport
 
 
+class FieldPort(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str
+    name: str
+    description: str
+    schema_def: JsonObject = Field(alias="schema")
+    concept: str
+    cardinality: Literal["one", "many"] = "one"
+    required: bool = False
+
+
+class CapabilityGraphNode(BaseModel):
+    tool_id: str
+    tool_name: str
+    role: Literal["provider", "terminal"]
+
+
+class CapabilityGraphEdge(BaseModel):
+    provider_tool_id: str
+    consumer_tool_id: str
+    output_path: str
+    input_path: str
+    concept: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class CapabilityGraphIssue(BaseModel):
+    level: Literal["warning", "blocking"]
+    code: str
+    tool_id: str
+    input_path: str | None = None
+    detail: str
+
+
+class GraphTestReport(BaseModel):
+    schema_version: Literal["gateforge.graph-test/v1"] = "gateforge.graph-test/v1"
+    cases: list[TestCaseResult]
+    pass_rate: float
+    blocking_failures: int
+
+
+class CapabilityGraph(BaseModel):
+    schema_version: Literal["gateforge.capability-graph/v1"] = "gateforge.capability-graph/v1"
+    id: str
+    name: str
+    description: str
+    output_description: str
+    terminal_tool_id: str
+    terminal_tool_name: str
+    nodes: list[CapabilityGraphNode]
+    edges: list[CapabilityGraphEdge]
+    execution_order: list[str]
+    subgraph_ids: list[str] = Field(default_factory=list)
+    input_schema: JsonObject
+    output_schema: JsonObject
+    zero_input: bool
+    confidence: float = Field(ge=0, le=1)
+    status: Literal["ready", "needs_input", "ambiguous", "blocked"]
+    governance: JsonObject
+    issues: list[CapabilityGraphIssue] = Field(default_factory=list)
+    test_report: GraphTestReport
+
+
 class PackArtifact(BaseModel):
-    schema_version: Literal["gateforge.mcp-pack/v1"] = "gateforge.mcp-pack/v1"
+    schema_version: Literal["gateforge.mcp-pack/v1", "gateforge.mcp-pack/v2"] = "gateforge.mcp-pack/v2"
     id: str
     name: str
     slug: str
@@ -177,6 +252,7 @@ class PackArtifact(BaseModel):
     status: Literal["ready", "blocked"]
     mcp_server: JsonObject
     tools: list[JsonObject]
+    capability_graphs: list[CapabilityGraph] = Field(default_factory=list)
     backend_mappings: JsonObject
     endpoints: list[JsonObject]
     governance: JsonObject
@@ -202,8 +278,129 @@ class DashboardView(BaseModel):
     accepted_tools: int
     rejected_operations: int
     clusters: int
+    capability_graphs: int
+    zero_input_graphs: int
+    graph_coverage: float
     packs: int
     ready_packs: int
     registered_packs: int
     average_quality: float
     recent_packs: list[PackArtifact]
+
+
+class PackRecommendationRequest(BaseModel):
+    description: str = Field(min_length=4, max_length=2000)
+    max_items: int = Field(default=6, ge=1, le=20)
+
+
+class PackRecommendationItem(BaseModel):
+    kind: Literal["graph", "tool"]
+    id: str
+    name: str
+    description: str
+    score: float = Field(ge=0, le=1)
+    reason: str
+
+
+class PackRecommendation(BaseModel):
+    description: str
+    items: list[PackRecommendationItem]
+    graph_ids: list[str]
+    tool_ids: list[str]
+
+
+def _http_url(value: str, *, allow_empty: bool = False) -> str:
+    value = value.strip().rstrip("/")
+    if allow_empty and not value:
+        return ""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("必须填写有效的 HTTP(S) 地址")
+    if parsed.username or parsed.password:
+        raise ValueError("地址中不能包含用户名或密码")
+    return value
+
+
+class NacosSettingsInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_url: str = Field(alias="serverUrl", min_length=1, max_length=2048)
+    context_path: str = Field(default="/nacos", alias="contextPath", max_length=200)
+    namespace: str = Field(default="public", min_length=1, max_length=255)
+    username: str = Field(default="", max_length=255)
+    password: str | None = Field(default=None, max_length=4096)
+    clear_password: bool = Field(default=False, alias="clearPassword")
+
+    @field_validator("server_url")
+    @classmethod
+    def validate_server_url(cls, value: str) -> str:
+        return _http_url(value)
+
+    @field_validator("context_path")
+    @classmethod
+    def validate_context_path(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        if not value.startswith("/") or "?" in value or "#" in value:
+            raise ValueError("上下文路径必须以 / 开头，且不能包含查询参数")
+        return "/" + value.strip("/")
+
+    @model_validator(mode="after")
+    def secret_action_is_unambiguous(self) -> "NacosSettingsInput":
+        if self.password and self.clear_password:
+            raise ValueError("不能同时填写新密码并清除密码")
+        return self
+
+
+class AiSettingsInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    base_url: str = Field(default="", alias="baseUrl", max_length=2048)
+    model: str = Field(default="", max_length=255)
+    api_key: str | None = Field(default=None, alias="apiKey", max_length=8192)
+    clear_api_key: bool = Field(default=False, alias="clearApiKey")
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        return _http_url(value, allow_empty=True)
+
+    @model_validator(mode="after")
+    def secret_action_is_unambiguous(self) -> "AiSettingsInput":
+        if self.api_key and self.clear_api_key:
+            raise ValueError("不能同时填写新 API Key 并清除密钥")
+        return self
+
+
+class IntakeSecuritySettingsInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    allowed_spec_hosts: list[str] = Field(default_factory=list, alias="allowedSpecHosts", max_length=500)
+    allow_private_spec_hosts: bool = Field(default=True, alias="allowPrivateSpecHosts")
+    l1_allow_origins: list[str] = Field(default_factory=list, alias="l1AllowOrigins", max_length=500)
+    l1_allow_unsafe_methods: bool = Field(default=False, alias="l1AllowUnsafeMethods")
+
+    @field_validator("allowed_spec_hosts")
+    @classmethod
+    def validate_hosts(cls, values: list[str]) -> list[str]:
+        result: list[str] = []
+        for raw in values:
+            value = raw.strip().lower().rstrip(".")
+            candidate = value[2:] if value.startswith("*.") else value
+            if not candidate or "://" in candidate or "/" in candidate or " " in candidate:
+                raise ValueError(f"不是有效的域名模式：{raw}")
+            if value not in result:
+                result.append(value)
+        return result
+
+    @field_validator("l1_allow_origins")
+    @classmethod
+    def validate_origins(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(_http_url(value) for value in values if value.strip()))
+
+
+class RuntimeSettingsUpdate(BaseModel):
+    nacos: NacosSettingsInput
+    ai: AiSettingsInput
+    intake: IntakeSecuritySettingsInput

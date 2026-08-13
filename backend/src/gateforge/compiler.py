@@ -5,7 +5,7 @@ from typing import Any
 
 from gateforge.dependency import build_dependency_graph
 from gateforge.errors import QualityGateError
-from gateforge.models import PackArtifact, PackBuildRequest
+from gateforge.models import CapabilityGraph, PackArtifact, PackBuildRequest
 from gateforge.settings import Settings
 from gateforge.testing import TestPipeline
 from gateforge.util import digest, new_id, now_iso, slugify
@@ -16,7 +16,13 @@ class PackCompiler:
         self.settings = settings
         self.tests = TestPipeline(settings)
 
-    async def compile(self, request: PackBuildRequest, tools: list[dict[str, Any]]) -> PackArtifact:
+    async def compile(
+        self,
+        request: PackBuildRequest,
+        tools: list[dict[str, Any]],
+        graphs: list[CapabilityGraph] | None = None,
+    ) -> PackArtifact:
+        graphs = graphs or []
         if not tools:
             raise QualityGateError("能力包没有可编译的工具", "选择至少一个已通过分析器检查的工具")
         rejected = [tool["standard"]["name"] for tool in tools if not tool["accepted"]]
@@ -36,7 +42,22 @@ class PackCompiler:
             )
 
         graph = build_dependency_graph(tools)
+        if graphs:
+            graph = merge_capability_edges(graph, graphs)
         report = await self.tests.run(tools, graph, run_l1=request.run_l1, run_l2=request.run_l2)
+        graph_cases = [case for capability in graphs for case in capability.test_report.cases]
+        if graph_cases:
+            cases = [*report.cases, *graph_cases]
+            scored = [case for case in cases if case.status != "skip"]
+            graph_score = sum(case.score for case in graph_cases) / len(graph_cases)
+            report = report.model_copy(update={
+                "cases": cases,
+                "pass_rate": round(sum(case.status == "pass" for case in scored) / len(scored), 3),
+                "quality_score": round(report.quality_score * 0.8 + graph_score * 0.2, 3),
+                "blocking_failures": report.blocking_failures + sum(
+                    capability.test_report.blocking_failures for capability in graphs
+                ),
+            })
         for tool in tools:
             tool["governance"]["testPassRate"] = report.pass_rate
             prior = float(tool["governance"]["qualityScore"])
@@ -46,7 +67,7 @@ class PackCompiler:
         cluster_keys = list(dict.fromkeys(tool["cluster_key"] for tool in tools))
         default_name = " + ".join(self._cluster_name(tool) for tool in tools[:2]) + " MCP 能力包"
         name = request.name or default_name
-        slug = request.slug or slugify(name, "mcp-pack")
+        slug = request.slug or slugify(name, "pack-" + digest(name).split(":", 1)[1][:12])
         description = request.description or self._description(tools)
         endpoint = first["endpoint"]
         mcp_server = {
@@ -72,6 +93,7 @@ class PackCompiler:
             "mcpProtocolProfile": "2025-06-18+higress-2.2.3",
             "sourceHashes": sorted({tool["source_spec_hash"] for tool in tools}),
             "clusterKeys": cluster_keys,
+            "capabilityGraphIds": [graph.id for graph in graphs],
             "toolFingerprints": {
                 tool["standard"]["name"]: tool["fingerprint"] for tool in tools
             },
@@ -83,7 +105,7 @@ class PackCompiler:
         ) else "blocked"
         pack_id = new_id()
         content = {
-            "schema_version": "gateforge.mcp-pack/v1",
+            "schema_version": "gateforge.mcp-pack/v2",
             "id": pack_id,
             "name": name,
             "slug": slug,
@@ -92,6 +114,7 @@ class PackCompiler:
             "status": status,
             "mcp_server": mcp_server,
             "tools": standard_tools,
+            "capability_graphs": [graph.model_dump() for graph in graphs],
             "backend_mappings": mappings,
             "endpoints": [endpoint],
             "governance": governance,
@@ -143,3 +166,26 @@ def pack_tools_from_clusters(
         tool for tool in all_tools
         if tool["id"] in selected_ids or tool["cluster_key"] in selected_clusters
     ]
+
+
+def merge_capability_edges(graph: Any, capabilities: list[CapabilityGraph]) -> Any:
+    """把已通过字段级检查的能力图边投影到 Pack 主依赖图。"""
+    from gateforge.models import DependencyEdge
+
+    merged: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        merged[(edge.provider, edge.consumer)].update(edge.fields)
+    for capability in capabilities:
+        for edge in capability.edges:
+            merged[(edge.provider_tool_id, edge.consumer_tool_id)].add(edge.concept)
+    edges = [
+        DependencyEdge(provider=provider, consumer=consumer, fields=sorted(fields))
+        for (provider, consumer), fields in sorted(merged.items())
+    ]
+    node_ids = {node.tool_id for node in graph.nodes}
+    incoming = {edge.consumer for edge in edges}
+    outgoing = {edge.provider for edge in edges}
+    closure = graph.closure.model_copy(update={
+        "unreachable_tools": sorted(node_ids - incoming - outgoing) if edges else [],
+    })
+    return graph.model_copy(update={"edges": edges, "closure": closure})

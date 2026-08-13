@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: GateForge 能力图验证 API
+  version: 1.0.0
+servers:
+  - url: https://orders.example.com/v1
+security:
+  - internalApiKey: []
+components:
+  securitySchemes:
+    internalApiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+paths:
+  /users/current:
+    get:
+      operationId: getCurrentUser
+      tags: [Orders]
+      summary: 查询当前登录用户
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    description: 当前用户唯一标识
+  /users/{userId}/orders/latest-cancelable:
+    get:
+      operationId: getLatestCancelableOrder
+      tags: [Orders]
+      summary: 查询用户最新可取消订单
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: 用户唯一标识
+          schema: {type: string}
+      responses:
+        '200':
+          description: 最新可取消订单
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                    description: 可取消订单唯一标识
+  /orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [Orders]
+      summary: 取消指定订单
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: 需要取消的订单唯一标识
+          schema: {type: string}
+      responses:
+        '200':
+          description: 订单取消结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancellationId:
+                    type: string
+                    description: 取消记录唯一标识
+                  status:
+                    type: string
+                    description: 取消后的订单状态

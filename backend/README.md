@@ -5,6 +5,8 @@ GateForge 把 OpenAPI/Swagger 加工为带治理、依赖图与自动测试证�
 
 生产部署统一使用仓库根目录的 `Dockerfile` 与 `compose.yaml`。镜像会把 Vite 前端编译后
 交给 FastAPI 托管，前后端共用 8081 端口；数据库固定写入 `/data/gateforge.db` 持久卷。
+设置页可维护 Nacos、OpenAI 兼容大模型和内网导入策略；写接口由管理令牌保护，敏感值
+加密保存且不通过读取接口回显。环境变量仍作为首次启动默认值。
 
 ## 本地运行
 
@@ -26,8 +28,9 @@ npm run dev
 
 - `POST /api/sources` / `POST /api/sources/batch`：导入、分析、过滤与富化 API。
 - `GET /api/tools`：标准 MCP 工具 + 独立治理元数据。
-- `GET /api/clusters`：领域/意图聚类建议。
-- `POST /api/packs/build`：依赖图、L0/L1/L2、闭包与能力包编译。
+- `GET /api/graphs` / `POST /api/graphs/rebuild`：读取或重建经字段配对、回溯和图测试的能力图。
+- `POST /api/packs/recommend`：根据能力包目标描述匹配同一后端来源中的图与原子工具。
+- `POST /api/packs/build`：能力图、L0/L1/L2、闭包与能力包编译。
 - `POST /api/packs/{id}/register`：通过 Nacos 官方接口注册通过检查的能力包。
 - `GET /api/registrations`：读取 GateForge 保存的 Nacos 回读结果。
 
@@ -37,7 +40,7 @@ npm run dev
 
 - `DATABASE_PATH`：SQLite 路径，默认 `./data/gateforge.db`。
 - `ALLOWED_SPEC_HOSTS`：远程 OpenAPI 主机允许列表。
-- `ALLOW_PRIVATE_SPEC_HOSTS`：允许导入私网规范；默认关闭。
+- `ALLOW_PRIVATE_SPEC_HOSTS`：允许导入 RFC1918/IPv6 ULA 私网规范；企业自托管默认开启。
 - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`：可选 OpenAI 兼容富化器。
 - `NACOS_SERVER_URL` / `NACOS_CONTEXT_PATH` / `NACOS_NAMESPACE`。
 - `NACOS_USERNAME` / `NACOS_PASSWORD`。

@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 
+from gateforge.errors import GateForgeError
 from gateforge.settings import Settings
 from gateforge.util import slugify
 
@@ -95,3 +96,38 @@ class ToolEnricher:
                 1.0, round(float(tool["governance"]["qualityScore"]) + 0.06, 3)
             )
         return tools
+
+    async def probe(self) -> dict[str, Any]:
+        if not self.settings.ai_base_url or not self.settings.ai_api_key or not self.settings.ai_model:
+            raise GateForgeError("大模型连接信息不完整", "填写接口地址、API 密钥和模型名称", 422)
+        headers = {"Authorization": f"Bearer {self.settings.ai_api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+                response = await client.post(
+                    self.settings.ai_base_url.rstrip("/") + "/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": self.settings.ai_model,
+                        "temperature": 0,
+                        "max_tokens": 2,
+                        "messages": [{"role": "user", "content": "只回复：好"}],
+                    },
+                )
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPStatusError as error:
+            raise GateForgeError(
+                f"大模型连接测试失败：HTTP {error.response.status_code}",
+                "检查接口地址、API 密钥、模型名称以及 OpenAI 兼容接口",
+                503,
+            ) from error
+        except (httpx.HTTPError, ValueError) as error:
+            raise GateForgeError("无法连接大模型服务", str(error)[:500], 503) from error
+        choices = body.get("choices", []) if isinstance(body, dict) else []
+        if not choices:
+            raise GateForgeError("大模型响应缺少 choices", "检查 OpenAI 兼容协议实现", 503)
+        return {
+            "ok": True,
+            "model": self.settings.ai_model,
+            "responseReceived": True,
+        }

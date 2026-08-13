@@ -7,8 +7,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from gateforge import __version__
+from gateforge.capability_graph import CapabilityGraphBuilder
 from gateforge.api import router
 from gateforge.errors import GateForgeError
+from gateforge.runtime_settings import RuntimeSettings
 from gateforge.settings import Settings, settings
 from gateforge.store import Store
 
@@ -16,6 +18,11 @@ from gateforge.store import Store
 def create_app(config: Settings | None = None) -> FastAPI:
     config = config or settings
     store = Store(config.database_path)
+    if store.tools(accepted=True) and not store.capability_graphs():
+        store.replace_capability_graphs(
+            graph.model_dump() for graph in CapabilityGraphBuilder(store.tools(accepted=True)).build()
+        )
+    runtime_settings = RuntimeSettings(config, store)
     app = FastAPI(
         title="GateForge API",
         version=__version__,
@@ -23,7 +30,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
     )
     app.state.settings = config
     app.state.store = store
-    app.include_router(router(store, config))
+    app.state.runtime_settings = runtime_settings
+    app.include_router(router(store, config, runtime_settings))
 
     @app.exception_handler(GateForgeError)
     async def gateforge_error(_: Request, error: GateForgeError) -> JSONResponse:

@@ -56,7 +56,7 @@ async def test_cluster_and_compile_produce_governed_mcp_pack() -> None:
         selected,
     )
 
-    assert artifact.schema_version == "gateforge.mcp-pack/v1"
+    assert artifact.schema_version == "gateforge.mcp-pack/v2"
     assert artifact.status == "ready"
     assert artifact.tools
     assert artifact.mcp_server["frontProtocol"] == "mcp-sse"

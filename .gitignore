@@ -18,6 +18,7 @@ backend/**/*.pyc
 backend/*.egg-info/
 backend/data/
 backend/target/
+data/
 
 # Local environment and secrets
 .env

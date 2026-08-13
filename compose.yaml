@@ -11,13 +11,15 @@ services:
     environment:
       GATEFORGE_DATABASE_PATH: /data/gateforge.db
       GATEFORGE_STATIC_DIR: /app/static
+      GATEFORGE_ADMIN_TOKEN: "${GATEFORGE_ADMIN_TOKEN:-}"
+      GATEFORGE_SETTINGS_ENCRYPTION_KEY: "${GATEFORGE_SETTINGS_ENCRYPTION_KEY:-}"
       GATEFORGE_NACOS_SERVER_URL: "${GATEFORGE_NACOS_SERVER_URL:-http://host.docker.internal:8848}"
       GATEFORGE_NACOS_CONTEXT_PATH: "${GATEFORGE_NACOS_CONTEXT_PATH:-/nacos}"
       GATEFORGE_NACOS_NAMESPACE: "${GATEFORGE_NACOS_NAMESPACE:-public}"
       GATEFORGE_NACOS_USERNAME: "${GATEFORGE_NACOS_USERNAME:-}"
       GATEFORGE_NACOS_PASSWORD: "${GATEFORGE_NACOS_PASSWORD:-}"
       GATEFORGE_ALLOWED_SPEC_HOSTS: "${GATEFORGE_ALLOWED_SPEC_HOSTS:-}"
-      GATEFORGE_ALLOW_PRIVATE_SPEC_HOSTS: "${GATEFORGE_ALLOW_PRIVATE_SPEC_HOSTS:-false}"
+      GATEFORGE_ALLOW_PRIVATE_SPEC_HOSTS: "${GATEFORGE_ALLOW_PRIVATE_SPEC_HOSTS:-true}"
       GATEFORGE_AI_BASE_URL: "${GATEFORGE_AI_BASE_URL:-}"
       GATEFORGE_AI_API_KEY: "${GATEFORGE_AI_API_KEY:-}"
       GATEFORGE_AI_MODEL: "${GATEFORGE_AI_MODEL:-}"
@@ -37,6 +39,12 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/health', timeout=2).read()"]
       interval: 30s

@@ -75,6 +75,7 @@ async def test_nacos_adapter_uses_official_ai_mcp_admin_api() -> None:
     assert sidecar["digest"].startswith("sha256:")
     assert sidecar["policy"]["schemaVersion"] == "gateforge.governance/v1"
     assert meta["invokeContext"]["com.gateforge/packHash"] == artifact.artifact_hash
+    assert json.loads(meta["invokeContext"]["com.gateforge/capabilityGraphs"]) == []
     assert set(meta["templates"]["json-go-template"]["argsPosition"].values()) <= {
         "path", "query", "header", "body"
     }

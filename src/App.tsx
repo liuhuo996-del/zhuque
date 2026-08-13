@@ -6,6 +6,7 @@ import { Overview } from '@/pages/Overview'
 import { Intake } from '@/pages/Intake'
 import { Catalog } from '@/pages/Catalog'
 import { Clusters } from '@/pages/Clusters'
+import { Graphs } from '@/pages/Graphs'
 import { Packs } from '@/pages/Packs'
 import { PackDetail } from '@/pages/PackDetail'
 import { Registry } from '@/pages/Registry'
@@ -23,6 +24,7 @@ export default function App() {
               <Route index element={<Overview />} />
               <Route path="intake" element={<Intake />} />
               <Route path="catalog" element={<Catalog />} />
+              <Route path="graphs" element={<Graphs />} />
               <Route path="clusters" element={<Clusters />} />
               <Route path="packs" element={<Packs />} />
               <Route path="packs/:id" element={<PackDetail />} />

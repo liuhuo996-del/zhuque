@@ -47,6 +47,16 @@ create table if not exists tool (
 create index if not exists idx_tool_cluster on tool(cluster_key);
 create index if not exists idx_tool_fingerprint on tool(fingerprint);
 
+create table if not exists capability_graph (
+  id text primary key,
+  terminal_tool_id text not null references tool(id) on delete cascade,
+  status text not null,
+  confidence real not null,
+  graph text not null
+);
+
+create index if not exists idx_capability_graph_status on capability_graph(status);
+
 create table if not exists pack (
   id text primary key,
   slug text not null,
@@ -65,6 +75,13 @@ create table if not exists nacos_registration (
   mcp_name text not null,
   registered_at text not null,
   raw text not null
+);
+
+create table if not exists system_setting (
+  key text primary key,
+  value text not null,
+  secret integer not null default 0,
+  updated_at text not null
 );
 """
 
@@ -153,6 +170,25 @@ class Store:
             raise NotFoundError("Tool")
         return result
 
+    def replace_capability_graphs(self, graphs: Iterable[dict[str, Any]]) -> None:
+        with self._lock, self._connection:
+            self._connection.execute("delete from capability_graph")
+            for graph in graphs:
+                self._connection.execute(
+                    """insert into capability_graph(id,terminal_tool_id,status,confidence,graph)
+                       values(?,?,?,?,?)""",
+                    (
+                        graph["id"], graph["terminal_tool_id"], graph["status"],
+                        graph["confidence"], canonical_json(graph),
+                    ),
+                )
+
+    def capability_graphs(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "select graph from capability_graph order by confidence desc,id"
+        ).fetchall()
+        return [json.loads(row["graph"]) for row in rows]
+
     def save_pack(self, artifact: dict[str, Any]) -> None:
         with self._lock, self._connection:
             self._connection.execute(
@@ -202,6 +238,28 @@ class Store:
             item["raw"] = json.loads(item["raw"])
             result.append(item)
         return result
+
+    def system_settings(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "select key,value,secret,updated_at from system_setting order by key"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_system_settings(
+        self,
+        values: dict[str, tuple[str, bool, str]],
+        deleted: Iterable[str] = (),
+    ) -> None:
+        with self._lock, self._connection:
+            for key in deleted:
+                self._connection.execute("delete from system_setting where key=?", (key,))
+            for key, (value, secret, updated_at) in values.items():
+                self._connection.execute(
+                    """insert into system_setting(key,value,secret,updated_at) values(?,?,?,?)
+                       on conflict(key) do update set value=excluded.value,
+                         secret=excluded.secret,updated_at=excluded.updated_at""",
+                    (key, value, 1 if secret else 0, updated_at),
+                )
 
     @staticmethod
     def _decode_tool(row: dict[str, Any]) -> dict[str, Any]:

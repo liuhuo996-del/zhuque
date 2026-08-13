@@ -20,7 +20,7 @@ export async function copyText(text: string) {
 }
 
 const labels: Record<string, string> = {
-  ready: '可注册', blocked: '已阻断', pass: '通过', fail: '失败', warn: '警告', skip: '跳过',
+  ready: '已就绪', needs_input: '尚需入参', ambiguous: '存在歧义', blocked: '已阻断', pass: '通过', fail: '失败', warn: '警告', skip: '跳过',
   low: '低', medium: '中', high: '高', critical: '严重',
   readOnly: '只读', write: '写入', destructive: '破坏性',
   test: '测试', staging: '预发布', prod: '生产',
@@ -29,6 +29,7 @@ const labels: Record<string, string> = {
   schema: '结构规范', 'mcp-contract': 'MCP 协议契约', 'parameter-boundary': '参数边界',
   security: '安全策略', permission: '权限策略', connectivity: '后端连通性',
   'response-schema': '响应结构', 'semantic-selection': '语义工具选择', 'dependency-closure': '依赖闭包',
+  'graph-schema': '能力图结构', 'graph-edge': '字段绑定', 'graph-order': '执行顺序', 'graph-governance': '图治理传播',
   parameter: '参数闭包', type: '类型闭包', risk: '风险闭包', sideEffect: '副作用闭包',
   cycles: '循环依赖', reachability: '可达性',
   deprecated: '接口已废弃', 'operational-endpoint': '运行探针接口',

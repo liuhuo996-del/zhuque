@@ -3,13 +3,13 @@ import { useMemo, useState } from 'react'
 import { LogoLockup } from '@/components/Logo'
 import { cn } from '@/lib/utils'
 
-type Icon = 'overview' | 'intake' | 'catalog' | 'clusters' | 'packs' | 'registry' | 'settings'
+type Icon = 'overview' | 'intake' | 'catalog' | 'graphs' | 'packs' | 'registry' | 'settings'
 const groups = [
   { label: '工程工作台', items: [
     { to: '/', label: '工程概览', icon: 'overview' as Icon, end: true },
     { to: '/intake', label: 'API 接入分析', icon: 'intake' as Icon },
     { to: '/catalog', label: '工具目录', icon: 'catalog' as Icon },
-    { to: '/clusters', label: '意图聚类', icon: 'clusters' as Icon },
+    { to: '/graphs', label: '能力图谱', icon: 'graphs' as Icon },
   ]},
   { label: '编译交付', items: [
     { to: '/packs', label: 'MCP 能力包', icon: 'packs' as Icon },
@@ -56,7 +56,7 @@ function Glyph({ name }: { name: Icon }) {
     overview: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
     intake: 'M12 3v12m0 0-4-4m4 4 4-4M4 18v2h16v-2',
     catalog: 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5',
-    clusters: 'M7 7h4v4H7zM15 4h4v4h-4zM15 16h4v4h-4zM11 9h3m3-1v8M11 9l4-3M11 10l4 7',
+    graphs: 'M5 4h5v5H5zM14 3h5v5h-5zM14 16h5v5h-5zM10 6.5h4m2.5 1.5v8M10 8l4 9',
     packs: 'm12 3 8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 17l8 4 8-4',
     registry: 'M4 6c0-2 16-2 16 0s-16 2-16 0zm0 0v12c0 2 16 2 16 0V6M4 12c0 2 16 2 16 0',
     settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0-5v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4',

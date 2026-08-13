@@ -11,8 +11,12 @@ class Settings(BaseSettings):
     app_name: str = "GateForge"
     database_path: Path = Path("./data/gateforge.db")
     static_dir: Path = Path("./static")
+    admin_token: str = ""
+    settings_encryption_key: str = ""
     allowed_spec_hosts: str = ""
-    allow_private_spec_hosts: bool = False
+    # GateForge 的默认交付形态是客户网络内自托管，企业 RFC1918/ULA 地址必须开箱可用。
+    # 公网多租户部署应显式关闭；回环、链路本地、保留和组播地址始终禁止。
+    allow_private_spec_hosts: bool = True
     request_timeout_seconds: float = 10.0
 
     ai_base_url: str = ""
@@ -32,7 +36,20 @@ class Settings(BaseSettings):
 
     @property
     def spec_host_allowlist(self) -> set[str]:
-        return {value.strip().lower() for value in self.allowed_spec_hosts.split(",") if value.strip()}
+        values = self.allowed_spec_hosts.replace("\n", ",")
+        return {value.strip().lower().rstrip(".") for value in values.split(",") if value.strip()}
+
+    def spec_host_is_allowed(self, host: str) -> bool:
+        normalized = host.lower().rstrip(".")
+        return any(
+            normalized == pattern
+            or (
+                pattern.startswith("*.")
+                and normalized.endswith(pattern[1:])
+                and normalized != pattern[2:]
+            )
+            for pattern in self.spec_host_allowlist
+        )
 
     @property
     def l1_origin_allowlist(self) -> set[str]:

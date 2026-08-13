@@ -83,8 +83,57 @@ export interface TestCaseResult {
   evidence: JsonObject
 }
 
+export interface CapabilityGraph {
+  schema_version: 'gateforge.capability-graph/v1'
+  id: string
+  name: string
+  description: string
+  output_description: string
+  terminal_tool_id: string
+  terminal_tool_name: string
+  nodes: Array<{ tool_id: string; tool_name: string; role: 'provider' | 'terminal' }>
+  edges: Array<{
+    provider_tool_id: string
+    consumer_tool_id: string
+    output_path: string
+    input_path: string
+    concept: string
+    confidence: number
+    evidence: string[]
+  }>
+  execution_order: string[]
+  subgraph_ids: string[]
+  input_schema: JsonObject
+  output_schema: JsonObject
+  zero_input: boolean
+  confidence: number
+  status: 'ready' | 'needs_input' | 'ambiguous' | 'blocked'
+  governance: JsonObject
+  issues: Array<{ level: 'warning' | 'blocking'; code: string; tool_id: string; input_path?: string; detail: string }>
+  test_report: {
+    schema_version: 'gateforge.graph-test/v1'
+    cases: TestCaseResult[]
+    pass_rate: number
+    blocking_failures: number
+  }
+}
+
+export interface PackRecommendation {
+  description: string
+  items: Array<{
+    kind: 'graph' | 'tool'
+    id: string
+    name: string
+    description: string
+    score: number
+    reason: string
+  }>
+  graph_ids: string[]
+  tool_ids: string[]
+}
+
 export interface PackArtifact {
-  schema_version: 'gateforge.mcp-pack/v1'
+  schema_version: 'gateforge.mcp-pack/v1' | 'gateforge.mcp-pack/v2'
   id: string
   name: string
   slug: string
@@ -93,6 +142,7 @@ export interface PackArtifact {
   status: 'ready' | 'blocked'
   mcp_server: JsonObject
   tools: Array<{ name: string; description: string; inputSchema: JsonObject; annotations?: JsonObject }>
+  capability_graphs: CapabilityGraph[]
   backend_mappings: JsonObject
   endpoints: JsonObject[]
   governance: { schemaVersion: string; digest: string; tools: Record<string, GovernanceMetadata> }
@@ -140,9 +190,63 @@ export interface Dashboard {
   accepted_tools: number
   rejected_operations: number
   clusters: number
+  capability_graphs: number
+  zero_input_graphs: number
+  graph_coverage: number
   packs: number
   ready_packs: number
   registered_packs: number
   average_quality: number
   recent_packs: PackArtifact[]
+}
+
+export interface RuntimeSettingsView {
+  nacos: {
+    serverUrl: string
+    contextPath: string
+    namespace: string
+    username: string
+    passwordConfigured: boolean
+    passwordSaved: boolean
+    minVersion: string
+  }
+  ai: {
+    baseUrl: string
+    model: string
+    apiKeyConfigured: boolean
+    apiKeySaved: boolean
+    mode: 'ai' | 'deterministic'
+  }
+  intake: {
+    allowedSpecHosts: string[]
+    allowPrivateSpecHosts: boolean
+    l1AllowOrigins: string[]
+    l1AllowUnsafeMethods: boolean
+  }
+  qualityThreshold: number
+  adminWriteEnabled: boolean
+  boundaries: JsonObject
+}
+
+export interface RuntimeSettingsPayload {
+  nacos: {
+    serverUrl: string
+    contextPath: string
+    namespace: string
+    username: string
+    password?: string
+    clearPassword: boolean
+  }
+  ai: {
+    baseUrl: string
+    model: string
+    apiKey?: string
+    clearApiKey: boolean
+  }
+  intake: {
+    allowedSpecHosts: string[]
+    allowPrivateSpecHosts: boolean
+    l1AllowOrigins: string[]
+    l1AllowUnsafeMethods: boolean
+  }
 }

@@ -26,6 +26,10 @@ SENSITIVE_NAMES = {
     "email", "bank", "card", "account", "地址", "address",
 }
 HEALTH_PATHS = {"/health", "/healthz", "/metrics", "/ready", "/readiness", "/live", "/liveness"}
+ENTERPRISE_PRIVATE_NETWORKS = tuple(
+    ipaddress.ip_network(value)
+    for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
 
 
 class OpenApiIntake:
@@ -101,10 +105,9 @@ class OpenApiIntake:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise GateForgeError("spec URL 必须是 HTTP(S)", "使用可访问的 OpenAPI URL", 422)
         host = parsed.hostname.lower()
-        if self.settings.spec_host_allowlist and host not in self.settings.spec_host_allowlist:
+        explicitly_allowed = self.settings.spec_host_is_allowed(host)
+        if self.settings.spec_host_allowlist and not explicitly_allowed:
             raise GateForgeError("spec host 不在允许列表", "配置 GATEFORGE_ALLOWED_SPEC_HOSTS", 403)
-        if self.settings.allow_private_spec_hosts:
-            return
         try:
             addresses = await __import__("asyncio").get_running_loop().run_in_executor(
                 None, lambda: socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
@@ -113,8 +116,25 @@ class OpenApiIntake:
             raise GateForgeError("无法解析 spec host", str(error), 422) from error
         for address in {item[4][0] for item in addresses}:
             ip = ipaddress.ip_address(address)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise GateForgeError("spec URL 指向私有或保留地址", "使用 allowlist 或显式开启私网导入", 403)
+            if ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                raise GateForgeError(
+                    "OpenAPI 地址指向禁止访问的本机或保留地址",
+                    "不要使用 localhost、127.0.0.1、链路本地或云元数据地址；Docker 访问宿主机请使用 host.docker.internal",
+                    403,
+                )
+            enterprise_private = any(ip in network for network in ENTERPRISE_PRIVATE_NETWORKS)
+            if enterprise_private and not (self.settings.allow_private_spec_hosts or explicitly_allowed):
+                raise GateForgeError(
+                    "当前部署处于严格模式，OpenAPI 地址解析到企业私网",
+                    "在“设置 → OpenAPI 导入安全”中允许企业私网，或只加入可信域名",
+                    403,
+                )
+            if not enterprise_private and not ip.is_global and not explicitly_allowed:
+                raise GateForgeError(
+                    "OpenAPI 地址不属于公网或标准企业私网",
+                    "如果这是可信的特殊网络地址，请将对应域名加入可信名单",
+                    403,
+                )
 
     @staticmethod
     def _parse_document(spec_text: str) -> dict[str, Any]:
@@ -374,7 +394,10 @@ class OpenApiIntake:
     @staticmethod
     def _effect(method: str, path: str, summary: str) -> str:
         text = f"{path} {summary}".lower()
-        if method == "DELETE" or any(value in text for value in ("delete", "remove", "cancel", "删除", "取消")):
+        if method == "DELETE" or (
+            method not in READ_METHODS
+            and any(value in text for value in ("delete", "remove", "cancel", "删除", "取消"))
+        ):
             return "destructive"
         if method in READ_METHODS:
             return "read"

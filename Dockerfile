@@ -23,8 +23,17 @@ RUN groupadd --gid 10001 gateforge \
     && useradd --uid 10001 --gid gateforge --no-create-home --home-dir /app --shell /usr/sbin/nologin gateforge
 
 COPY backend/pyproject.toml /tmp/gateforge/pyproject.toml
+RUN pip install \
+      'cryptography>=43,<47' \
+      'fastapi>=0.115,<1' \
+      'httpx>=0.27,<1' \
+      'jsonschema>=4.23,<5' \
+      'pydantic>=2.9,<3' \
+      'pydantic-settings>=2.5,<3' \
+      'PyYAML>=6.0,<7' \
+      'uvicorn[standard]>=0.30,<1'
 COPY backend/src /tmp/gateforge/src
-RUN pip install /tmp/gateforge \
+RUN pip install --no-deps /tmp/gateforge \
     && rm -rf /tmp/gateforge
 
 COPY --from=frontend /build/dist /app/static

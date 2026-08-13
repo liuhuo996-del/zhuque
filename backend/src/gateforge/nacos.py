@@ -119,6 +119,41 @@ class NacosAdapter:
         endpoint = pack.endpoints[0]
         tools_meta = {}
         registry_tools = []
+        graphs_by_tool = {
+            tool["name"]: [
+                {
+                    "id": graph.id,
+                    "terminalTool": graph.terminal_tool_name,
+                    "executionOrder": [
+                        next(node.tool_name for node in graph.nodes if node.tool_id == tool_id)
+                        for tool_id in graph.execution_order
+                    ],
+                    "bindings": [
+                        {
+                            "providerTool": next(
+                                node.tool_name for node in graph.nodes
+                                if node.tool_id == edge.provider_tool_id
+                            ),
+                            "consumerTool": next(
+                                node.tool_name for node in graph.nodes
+                                if node.tool_id == edge.consumer_tool_id
+                            ),
+                            "outputPath": edge.output_path,
+                            "inputPath": edge.input_path,
+                            "confidence": edge.confidence,
+                        }
+                        for edge in graph.edges
+                    ],
+                    "inputSchema": graph.input_schema,
+                    "outputDescription": graph.output_description,
+                    "riskLevel": graph.governance.get("riskLevel"),
+                    "approvalRequired": graph.governance.get("approvalRequired", False),
+                }
+                for graph in pack.capability_graphs
+                if any(node.tool_name == tool["name"] for node in graph.nodes)
+            ]
+            for tool in pack.tools
+        }
         for tool in pack.tools:
             name = tool["name"]
             policy = pack.governance["tools"][name]
@@ -138,6 +173,10 @@ class NacosAdapter:
                         policy_envelope, ensure_ascii=False, separators=(",", ":"), sort_keys=True
                     ),
                     "com.gateforge/packHash": pack.artifact_hash,
+                    "com.gateforge/capabilityGraphs": json.dumps(
+                        graphs_by_tool[name], ensure_ascii=False,
+                        separators=(",", ":"), sort_keys=True,
+                    ),
                 },
                 "templates": {
                     "json-go-template": {
@@ -175,6 +214,18 @@ class NacosAdapter:
         for tool in pack.tools:
             context = ((tools_meta.get(tool["name"]) or {}).get("invokeContext") or {})
             if context.get("com.gateforge/packHash") != pack.artifact_hash:
+                return False
+            try:
+                registered_graphs = json.loads(
+                    str(context.get("com.gateforge/capabilityGraphs", "[]"))
+                )
+            except json.JSONDecodeError:
+                return False
+            expected_graph_ids = sorted(
+                graph.id for graph in pack.capability_graphs
+                if any(node.tool_name == tool["name"] for node in graph.nodes)
+            )
+            if sorted(str(graph.get("id")) for graph in registered_graphs) != expected_graph_ids:
                 return False
             try:
                 envelope = json.loads(str(context.get("com.gateforge/governance", "")))
